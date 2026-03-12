@@ -14,7 +14,7 @@ from src.vector_store import VectorStore
 def main() -> None:
     store = VectorStore()
     sample_text = (
-        "As of 2026-03-11, my deep work block is 6:30-9:00 AM on weekdays. "
+        "As of 2026-03-11, example user focus block is 6:30-9:00 AM on weekdays. "
         "This is the current default unless explicitly updated."
     )
     chunk_id = store.add_chunk(text=sample_text, source_type="example_setup")

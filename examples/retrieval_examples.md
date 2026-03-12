@@ -7,7 +7,7 @@ These examples show MCP tool usage patterns, not a strict client SDK.
 tool: store
 input:
 {
-  "text": "As of 2026-03-08, my deep work block is 6:30-9:00 AM on weekdays."
+  "text": "As of 2026-03-08, example user focus block is 6:30-9:00 AM on weekdays."
 }
 ```
 
@@ -27,7 +27,7 @@ tool: update
 input:
 {
   "chunk_id": "<existing_chunk_id>",
-  "new_text": "Update: my deep work block is now 7:00-9:30 AM on weekdays.",
+  "new_text": "Update: example user focus block is now 7:00-9:30 AM on weekdays.",
   "strategy": "version"
 }
 ```

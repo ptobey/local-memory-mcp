@@ -135,7 +135,7 @@ SSE endpoints:
 ```text
 tool: store
 input: {
-  "text": "I moved my daily deep work block to 6:30-9:00 AM. This is now my default schedule."
+  "text": "Example user context: weekday focus block is 6:30-9:00 AM as the current default schedule."
 }
 ```
 
