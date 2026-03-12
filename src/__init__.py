@@ -1,1 +1,1 @@
-# Second Brain v5 - Simplified Vector Memory System
+# Local Memory MCP v1 - Simplified Vector Memory System

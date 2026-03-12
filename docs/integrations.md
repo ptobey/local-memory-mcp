@@ -13,9 +13,9 @@ As of March 11, 2026, OpenAI documentation states:
 - `localhost` endpoints are not supported for ChatGPT connector setup.
 - HTTPS is required.
 
-For this project, run your server locally and expose it through a separate relay workspace (for example `chunking-ngrok`) or a similar tunnel provider.
+For this project, run your server locally and expose it through a separate relay workspace (for example `local-memory-mcp-ngrok`) or a similar tunnel provider.
 
-### Step A: Harden `chunking` config before exposing anything
+### Step A: Harden local config before exposing anything
 
 Use OAuth for internet-exposed endpoints:
 
@@ -55,7 +55,7 @@ If you keep `MCP_AUTH_MODE="none"` while adding non-local hosts/origins, startup
 ```powershell
 $env:MCP_BIND_HOST = "127.0.0.1"
 $env:MCP_BIND_PORT = "8000"
-.\.venv\Scripts\python.exe run_mcp_v5_sse_actions.py
+.\.venv\Scripts\python.exe run_mcp_v1_http_sse.py
 ```
 
 This server now exposes:
@@ -69,7 +69,7 @@ This server now exposes:
 `ngrok` example from separate folder:
 
 ```powershell
-cd ..\chunking-ngrok
+cd ..\local-memory-mcp-ngrok
 .\start_ngrok_and_mcp_sse.bat
 ```
 
@@ -97,10 +97,10 @@ Example config:
 ```json
 {
   "mcpServers": {
-    "second-brain-v5": {
-      "command": "C:\\Users\\<you>\\OneDrive\\Desktop\\chunking\\.venv\\Scripts\\python.exe",
+    "local-memory-mcp-v1": {
+      "command": "C:\\Users\\<you>\\OneDrive\\Desktop\\local-memory-mcp\\.venv\\Scripts\\python.exe",
       "args": [
-        "C:\\Users\\<you>\\OneDrive\\Desktop\\chunking\\run_mcp_v5_stdio.py"
+        "C:\\Users\\<you>\\OneDrive\\Desktop\\local-memory-mcp\\run_mcp_v1_stdio.py"
       ]
     }
   }
@@ -134,7 +134,7 @@ Recommended secure fix:
 1. Use `MCP_AUTH_MODE="oauth"` for exposed endpoints.
 2. Add your public tunnel/domain host to `MCP_ALLOWED_HOSTS`.
 3. Add the corresponding `https://` origin to `MCP_ALLOWED_ORIGINS`.
-4. Restart `run_mcp_v5_sse_actions.py` after config changes.
+4. Restart `run_mcp_v1_http_sse.py` after config changes.
 
 Example host/origin additions:
 

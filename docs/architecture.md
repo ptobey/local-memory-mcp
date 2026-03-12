@@ -1,14 +1,14 @@
 # Architecture
 
-This document describes the current v5 architecture as implemented today.
+This document describes the current v1 architecture as implemented today.
 
 ## Core Components
-- `src/mcp_server_v5.py`: MCP tool surface and warning/self-heal orchestration.
+- `src/mcp_server_v1.py`: MCP tool surface and warning/self-heal orchestration.
 - `src/vector_store.py`: chunk persistence, metadata, retrieval, backup/restore.
 - `src/reconciliation.py`: heuristic overlap/conflict detection and reconciliation log writes.
 - `src/health_monitor.py`: oversized chunk and unresolved conflict reporting.
-- `run_mcp_v5_stdio.py`: stdio MCP runner.
-- `run_mcp_v5_sse_actions.py`: FastAPI SSE transport wrapper for MCP.
+- `run_mcp_v1_stdio.py`: stdio MCP runner.
+- `run_mcp_v1_http_sse.py`: FastAPI HTTP/SSE transport wrapper for MCP.
 
 ## Storage Model
 - Primary memory collection: `master_memory`.

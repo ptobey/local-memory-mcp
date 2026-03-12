@@ -148,7 +148,7 @@ elif _auth_mode == "oauth":
     )
 
 mcp = FastMCP(
-    "SecondBrainV5",
+    "LocalMemoryMCPV1",
     transport_security=_transport_security,
     auth=_auth_settings,
     token_verifier=_token_verifier,

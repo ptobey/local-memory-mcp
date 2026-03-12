@@ -1,7 +1,7 @@
-# Second Brain v5
+# Local Memory MCP v1
 
 ## What Is This?
-Second Brain v5 is a local-first personal RAG memory system for AI assistants.  
+Local Memory MCP v1 is a local-first personal RAG memory system for AI assistants.  
 It stores text chunks plus lightweight metadata in a local ChromaDB, then exposes MCP tools so a new LLM session can quickly recover user context.
 
 This project is built for technical users who want to self-host and control their own data. It is not a SaaS product.
@@ -19,8 +19,8 @@ The goal is practical retrieval quality and reliable AI behavior, not perfect hu
 ## How It Works
 ```mermaid
 flowchart LR
-    A[Assistant via MCP Client] --> B[run_mcp_v5_stdio.py or run_mcp_v5_sse_actions.py]
-    B --> C[src/mcp_server_v5.py]
+    A[Assistant via MCP Client] --> B[run_mcp_v1_stdio.py or run_mcp_v1_http_sse.py]
+    B --> C[src/mcp_server_v1.py]
     C --> D[src/vector_store.py]
     C --> E[src/reconciliation.py]
     C --> F[src/health_monitor.py]
@@ -39,7 +39,7 @@ Read path:
 3. Deprecated chunks stay hidden by default unless explicitly requested.
 
 ## Features
-Current v5 capabilities:
+Current v1 capabilities:
 
 - MCP tools for `store`, `search`, `update`, `delete`, `get_chunk`, `get_evolution_chain`.
 - Versioned updates (`strategy="version"`) with supersedes chains.
@@ -62,7 +62,7 @@ Prerequisites:
 
 ```bash
 git clone <your-repo-url>
-cd chunking
+cd local-memory-mcp
 python -m venv .venv
 ```
 
@@ -109,13 +109,13 @@ This performs one write and one retrieval, and creates `./chroma_db` automatical
 5. Run MCP over stdio (recommended starting point for real usage).
 
 ```bash
-python run_mcp_v5_stdio.py
+python run_mcp_v1_stdio.py
 ```
 
 6. Optional: run SSE server.
 
 ```bash
-python run_mcp_v5_sse_actions.py
+python run_mcp_v1_http_sse.py
 ```
 
 SSE endpoints:

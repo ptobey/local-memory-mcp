@@ -9,7 +9,7 @@ Most assistant memory systems overfit to human organization (folders, rigid sche
 - enough metadata for temporal/state reasoning,
 - and explicit update history.
 
-Second Brain v5 is intentionally text-first with minimal structure.
+Local Memory MCP v1 is intentionally text-first with minimal structure.
 
 ## Why Text-First + Lightweight Metadata
 - Text-first keeps high semantic density for retrieval and synthesis.
@@ -17,7 +17,7 @@ Second Brain v5 is intentionally text-first with minimal structure.
 - Supersedes/deprecation links preserve evolving state without erasing history.
 - Warning-rich write responses help the model avoid stale parallel summaries.
 
-## Design Lessons From v5
+## Design Lessons From v1
 - Chunk quality matters more than rigid document decomposition.
 - Versioning state changes is safer than overwriting.
 - Retrieval benefits from small pragmatic bonuses (lexical overlap + recency) layered on top of embeddings.

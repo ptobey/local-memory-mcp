@@ -11,7 +11,7 @@ from starlette.requests import Request
 # Add parent directory to path for package imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.mcp_server_v5 import (  # noqa: E402
+from src.mcp_server_v1 import (  # noqa: E402
     _allowed_hosts,
     _auth_mode,
     _auth_provider,
@@ -21,8 +21,8 @@ from src.mcp_server_v5 import (  # noqa: E402
 )
 
 app = FastAPI(
-    title="Second Brain v5 MCP SSE",
-    version="5.0.0",
+    title="Local Memory MCP v1",
+    version="1.0.0",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
@@ -186,7 +186,7 @@ def health_check() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-if __name__ == "__main__":
+def run_server() -> None:
     import uvicorn
 
     bind_host = (os.environ.get("MCP_BIND_HOST") or "127.0.0.1").strip() or "127.0.0.1"
@@ -199,7 +199,7 @@ if __name__ == "__main__":
         print("WARNING: Non-loopback bind with MCP_AUTH_MODE='none' is not recommended.")
 
     print("=" * 60)
-    print("Second Brain v5 - MCP HTTP/SSE Server")
+    print("Local Memory MCP v1 - MCP HTTP/SSE Server")
     print("=" * 60)
     print(f"Auth Mode: {_auth_mode}")
     print(f"Trusted Hosts: {', '.join(_trusted_hosts)}")
@@ -211,3 +211,7 @@ if __name__ == "__main__":
     print(f"Health: http://{bind_host}:{bind_port}/health")
     print("=" * 60)
     uvicorn.run(app, host=bind_host, port=bind_port)
+
+
+if __name__ == "__main__":
+    run_server()

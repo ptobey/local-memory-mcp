@@ -8,7 +8,7 @@
 ## 1. Clone and create virtual environment
 ```bash
 git clone <your-repo-url>
-cd chunking
+cd local-memory-mcp
 python -m venv .venv
 ```
 
@@ -71,12 +71,12 @@ Expected result:
 
 ## 5. Run MCP over stdio (recommended first)
 ```bash
-python run_mcp_v5_stdio.py
+python run_mcp_v1_stdio.py
 ```
 
 ## 6. Run MCP over SSE (optional)
 ```bash
-python run_mcp_v5_sse_actions.py
+python run_mcp_v1_http_sse.py
 ```
 
 Endpoints:
