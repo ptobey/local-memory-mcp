@@ -181,6 +181,9 @@ This is an early but usable v1 release.
 - APIs and internal heuristics may still change between minor versions.
 - Some rough edges are documented in [`docs/limitations.md`](docs/limitations.md).
 
+## Build Provenance
+This v1 release was developed with an AI-assisted coding workflow. Product direction, constraints, and final implementation decisions were led by Patrick Tobey.
+
 ## Documentation
 - Setup guide: [`docs/setup.md`](docs/setup.md)
 - Integration guide (ChatGPT + Claude Desktop): [`docs/integrations.md`](docs/integrations.md)
@@ -188,6 +191,8 @@ This is an early but usable v1 release.
 - AIX notes: [`docs/aix.md`](docs/aix.md)
 - Limitations: [`docs/limitations.md`](docs/limitations.md)
 - Roadmap: [`docs/roadmap.md`](docs/roadmap.md)
+- Security policy: [`SECURITY.md`](SECURITY.md)
+- Code of conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
 
 ## Contributing
 See [`CONTRIBUTING.md`](CONTRIBUTING.md).

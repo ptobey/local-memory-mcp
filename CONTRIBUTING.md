@@ -31,6 +31,23 @@ pip install -r requirements.txt
 - Update docs/examples when behavior changes.
 - If behavior is intentionally rough, document the limitation explicitly.
 
+## Good First Contributions
+- Documentation clarity improvements (setup, integrations, troubleshooting).
+- Reproducible bug fixes with minimal behavioral surface area.
+- Better error messages and config validation.
+- Small developer-experience improvements that keep local-first defaults.
+
+## Out Of Scope (For Now)
+- Large architecture redesigns.
+- New cloud/SaaS-style dependencies or hosted-control-plane assumptions.
+- Broad UI/product overhauls not tied to current v1 goals.
+- Major behavioral changes without prior issue discussion.
+
+## Maintainer Bandwidth
+- This is a small, early-stage project.
+- Review/response may take up to 7 days depending on workload.
+- PRs may be closed if they do not align with project scope or local-first/privacy constraints.
+
 ## Reporting Issues
 Please include:
 
@@ -41,4 +58,4 @@ Please include:
 
 ## Security
 Do not open public issues for exposed secrets or sensitive data.  
-Report privately to the maintainer.
+Report privately using the process in [`SECURITY.md`](SECURITY.md).
