@@ -11,7 +11,7 @@ This roadmap is intentionally realistic and focused on reliability.
 - Add optional import/export utilities for chunk portability.
 - Add operational docs for backup strategy and recovery drills.
 - Improve conflict triage ergonomics (clearer candidate ranking and review workflow).
-- Add clearer release/migration notes for persisted DB compatibility.
+- Add clearer release/migration notes for persisted DB changes.
 
 ## Later
 - Add optional packaging/distribution improvements (container image, pinned runtime profile).

@@ -74,7 +74,3 @@ Default behavior excludes deprecated chunks. Set `include_deprecated=True` for h
 - Self-heal contract fields (`self_heal_required`, `self_heal_steps`, and related metadata).
 
 This is designed so assistant clients can run deterministic remediation loops before finalizing user-facing responses.
-
-## Deprecation/Compatibility Notes
-- Legacy warning top-level fields are kept for compatibility.
-- Structured warning payload (`warnings[]`) should be treated as the primary integration contract going forward.

@@ -21,4 +21,4 @@ This release is usable, but intentionally early. Known constraints:
   Modes are `none`, `bearer`, and simple in-memory OAuth provider support for MCP integrations.
 
 - API surface may evolve.
-  Warning payloads keep backward compatibility today, but integration contracts may tighten in future releases.
+  Tool response contracts may tighten in future releases as the project matures.

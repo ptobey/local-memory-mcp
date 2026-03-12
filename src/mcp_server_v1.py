@@ -644,10 +644,6 @@ def _finalize_warning_payload(result: Dict[str, Any]) -> None:
         "reasons": warning_reasons,
         "primary_reason": str(primary.get("reason") or ""),
     }
-    primary_action = str(primary.get("recommended_next_action") or "").strip()
-    if primary_action:
-        # Keep the legacy top-level field aligned with the sorted primary warning.
-        result["recommended_next_action"] = primary_action
     _attach_self_heal_contract(result)
 
 
@@ -802,9 +798,7 @@ def store(text: str) -> Dict[str, Any]:
                 warning_reason = "recent_search_not_relevant_to_strong_candidates"
             else:
                 warning_reason = "no_recent_search_for_strong_candidates"
-            result["duplicate_warning"] = True
-            result["duplicate_warning_reason"] = warning_reason
-            result["recommended_next_action"] = (
+            recommended_action = (
                 "This store() looks like a state update and strong active matches exist. "
                 "Inspect candidate_update_targets and decide how to resolve it. Preferred path: "
                 "use search() if needed, then update(strategy='version') on the correct chunk, "
@@ -818,7 +812,7 @@ def store(text: str) -> Dict[str, Any]:
                     "This store() looks like an update/refinement to existing active memory and strong "
                     "candidate matches were found."
                 ),
-                recommended_next_action=result["recommended_next_action"],
+                recommended_next_action=recommended_action,
                 reason=warning_reason,
                 candidate_chunk_ids=[str(cid) for cid in sorted(strong_candidate_ids)],
             )
@@ -915,10 +909,9 @@ def update_chunk(
     reconciler.queue_for_reconciliation(updated_id)
     result: Dict[str, Any] = {"chunk_id": updated_id, "updated_from_chunk_id": chunk_id, "strategy": strategy}
     if strategy == "version" and isinstance(duplicate_risk, dict) and duplicate_risk.get("suspected"):
-        result["duplicate_warning"] = True
-        result["duplicate_warning_reason"] = str(duplicate_risk.get("reason") or "possible_reaffirmation")
-        result["duplicate_warning_hints"] = duplicate_risk.get("hints") or {}
-        result["recommended_next_action"] = (
+        duplicate_warning_reason = str(duplicate_risk.get("reason") or "possible_reaffirmation")
+        duplicate_warning_hints = duplicate_risk.get("hints") or {}
+        recommended_action = (
             "This version looks highly similar to the superseded chunk (possible reaffirmation/no-state-change version). "
             "AI should decide whether to keep it as an intentional freeze point or deprecate/delete the redundant version."
         )
@@ -929,10 +922,10 @@ def update_chunk(
             message=(
                 "This version looks highly similar to the superseded chunk and may be a reaffirmation/no-state-change version."
             ),
-            recommended_next_action=result["recommended_next_action"],
+            recommended_next_action=recommended_action,
             compare_chunk_id=chunk_id,
-            hints=result["duplicate_warning_hints"],
-            reason=result["duplicate_warning_reason"],
+            hints=duplicate_warning_hints,
+            reason=duplicate_warning_reason,
         )
     if strategy == "version":
         try:
@@ -981,12 +974,10 @@ def update(chunk_id: str, new_text: str, strategy: str = "version") -> Dict[str,
 
     After versioning a state chunk, search again and review any older parallel summaries
     that may now be stale/conflicting but are not part of the same supersedes chain.
-    If update() returns duplicate_warning=true, decide whether to keep it as an intentional
-    freeze point or remove the redundant reaffirmation version. Both store() and update()
-    may also return a structured warnings[] list for easier AI handling. Prefer warnings[],
-    warning_summary, and warning_context for issue handling; legacy top-level warning fields
-    are kept for compatibility. The response always includes self-heal fields; if
-    self_heal_required=true, complete remediation before finalizing the user-facing response.
+    Both store() and update() may return a structured warnings[] list for AI handling.
+    Prefer warnings[], warning_summary, and warning_context for issue handling.
+    The response always includes self-heal fields; if self_heal_required=true,
+    complete remediation before finalizing the user-facing response.
     """
     return update_chunk(chunk_id=chunk_id, new_text=new_text, strategy=strategy)
 
