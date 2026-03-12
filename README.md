@@ -17,15 +17,20 @@ AIX (AI eXperience) means designing for how LLMs actually consume context:
 The goal is practical retrieval quality and reliable AI behavior, not perfect human taxonomies.
 
 ## How It Works
-```mermaid
-flowchart LR
-    A[Assistant via MCP Client] --> B[run_mcp_v1_stdio.py or run_mcp_v1_http_sse.py]
-    B --> C[src/mcp_server_v1.py]
-    C --> D[src/vector_store.py]
-    C --> E[src/reconciliation.py]
-    C --> F[src/health_monitor.py]
-    D --> G[(Local ChromaDB)]
-    E --> H[(Reconciliation Log Collection)]
+```text
+[Assistant via MCP Client]
+            |
+            v
+[run_mcp_v1_stdio.py | run_mcp_v1_http_sse.py]
+            |
+            v
+      [src/mcp_server_v1.py]
+        /          |          \
+       v           v           v
+[src/vector_store.py] [src/reconciliation.py] [src/health_monitor.py]
+       |                   |
+       v                   v
+ [Local ChromaDB]   [Reconciliation Log Collection]
 ```
 
 Write path:
