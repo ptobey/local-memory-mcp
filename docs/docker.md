@@ -1,6 +1,7 @@
 # Docker Guide
 
-This project can run well in Docker for HTTP/SSE MCP usage.
+Docker is the recommended easiest installation path for this project.
+Use local Python setup only when you specifically need direct stdio process control.
 
 ## What Docker Is Good For Here
 - Running `run_mcp_v1_http_sse.py` as a local service.

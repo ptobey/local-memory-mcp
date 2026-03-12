@@ -57,13 +57,48 @@ Current v1 capabilities:
 - Optional auth modes for SSE: `none` (local-only), `bearer`, or `oauth`.
 
 ## Quickstart
-Prerequisites:
+Use one of the two paths below.
+If you are unsure, choose Path A (Docker).
 
+### Path A (Recommended Easiest): Docker
+Best for most users. This avoids local Python/venv setup.
+
+Prerequisite:
+- Docker Desktop (or Docker Engine) is installed and running.
+
+1. Clone the repo:
+```bash
+git clone <your-repo-url>
+cd local-memory-mcp
+```
+
+2. Start the service:
+```bash
+docker compose up --build -d
+```
+
+3. Verify endpoints:
+- `http://localhost:8000/mcp`
+- `http://localhost:8000/sse`
+- `http://localhost:8000/messages/`
+- `http://localhost:8000/health`
+
+4. Stop when finished:
+```bash
+docker compose down
+```
+
+For config mounts, volumes, and stdio-in-Docker details, see [`docs/docker.md`](docs/docker.md).
+
+### Path B: Local Python Install
+Use this when you want direct local Python control and stdio-first desktop workflows.
+
+Prerequisites:
 - Python 3.11+
 - `pip`
 - Windows PowerShell or a POSIX shell
 
-1. Clone and install dependencies.
+1. Clone and install dependencies:
 
 ```bash
 git clone <your-repo-url>
@@ -83,13 +118,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-2. Ensure the embedding model is available locally (one-time).
+2. Ensure the embedding model is available locally (one-time):
 
 ```bash
 python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 ```
 
-3. Optional: create a local config override (kept out of git).
+3. Optional: create a local config override (kept out of git):
 
 Windows PowerShell:
 ```powershell
@@ -103,7 +138,7 @@ cp config.example.json config.json
 
 If you skip this, built-in defaults are used (local-first, `MCP_AUTH_MODE=none`).
 
-4. Run a direct local verification (no MCP client required yet).
+4. Run a direct local verification (no MCP client required yet):
 
 ```bash
 python examples/try_local.py
@@ -111,48 +146,22 @@ python examples/try_local.py
 
 This performs one write and one retrieval, and creates `./chroma_db` automatically on first write.
 
-5. Run MCP over stdio (recommended starting point for real usage).
+5. Run MCP over stdio (recommended starting point for local runtime):
 
 ```bash
 python run_mcp_v1_stdio.py
 ```
 
-6. Optional: run SSE server.
+6. Optional: run SSE server:
 
 ```bash
 python run_mcp_v1_http_sse.py
 ```
 
-SSE endpoints:
-
-- `http://localhost:8000/mcp`
-- `http://localhost:8000/sse`
-- `http://localhost:8000/messages/`
-- `http://localhost:8000/health`
-
-7. Optional: expose SSE through an external relay workspace.
+7. Optional: expose SSE through an external relay workspace:
 
 - Keep relay scripts/config in a separate folder outside this repository.
 - Point the relay to `http://localhost:8000`.
-
-## Docker (Optional)
-Docker is best for HTTP/SSE MCP usage (`/mcp`, `/sse`, `/messages/`).
-
-Build:
-```bash
-docker build -t local-memory-mcp:latest .
-```
-
-Run:
-```bash
-docker run --rm -p 8000:8000 \
-  -v local_memory_chroma_db:/app/chroma_db \
-  -v local_memory_backups:/app/backups \
-  local-memory-mcp:latest
-```
-
-Stdio can run in Docker with `-i`, but local Python entrypoints are usually simpler for desktop stdio clients.
-See [`docs/docker.md`](docs/docker.md) for full details.
 
 ## Example Workflow
 ### 1. Store memory
