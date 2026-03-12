@@ -601,13 +601,22 @@ class VectorStore:
             1 for metadata in metadatas if bool((metadata or {}).get("deprecated", False))
         )
         active_chunks = total_chunks - deprecated_chunks
-        active_id_embeddings = [
-            (all_ids[idx], embeddings[idx])
-            for idx, metadata in enumerate(metadatas)
-            if not bool((metadata or {}).get("deprecated", False))
-        ]
+        active_id_embeddings: List[tuple[str, List[float]]] = []
+        invalid_embedding_records = 0
+        for idx, metadata in enumerate(metadatas):
+            if bool((metadata or {}).get("deprecated", False)):
+                continue
+            if idx >= len(all_ids) or idx >= len(embeddings):
+                invalid_embedding_records += 1
+                continue
+            raw_embedding = embeddings[idx]
+            coerced_embedding = _coerce_embedding(raw_embedding)
+            if coerced_embedding is None:
+                invalid_embedding_records += 1
+                continue
+            active_id_embeddings.append((all_ids[idx], coerced_embedding))
         unresolved = int(self.get_conflicts().get("unresolved_count", 0))
-        potential_duplicates = _count_duplicates(
+        potential_duplicates, duplicate_scan_errors = _count_duplicates(
             self.collection,
             active_id_embeddings,
             where={"deprecated": False},
@@ -627,12 +636,22 @@ class VectorStore:
             recommendations.append(
                 "Review unresolved reconciliation conflicts and resolve the ones that matter."
             )
+        if invalid_embedding_records:
+            recommendations.append(
+                "Some active chunks had missing/invalid embeddings during self-check; run update/store maintenance as needed."
+            )
+        if duplicate_scan_errors:
+            recommendations.append(
+                "Duplicate scan skipped some records due to query/index errors; consider a backup+restore cycle if this persists."
+            )
         return {
             "total_chunks": total_chunks,
             "active_chunks": active_chunks,
             "deprecated_chunks": deprecated_chunks,
             "unresolved_conflicts": unresolved,
             "potential_duplicates": potential_duplicates,
+            "duplicate_scan_errors": duplicate_scan_errors,
+            "invalid_embedding_records": invalid_embedding_records,
             "health_score": health_score,
             "recommendations": recommendations,
         }
@@ -779,26 +798,57 @@ class VectorStore:
             "message": f"Resolved {len(to_resolve)} conflict(s)"
         }
 
+def _coerce_embedding(value: Any) -> Optional[List[float]]:
+    if value is None:
+        return None
+    try:
+        items = list(value)
+    except TypeError:
+        return None
+    if not items:
+        return None
+    coerced: List[float] = []
+    for item in items:
+        try:
+            coerced.append(float(item))
+        except (TypeError, ValueError):
+            return None
+    return coerced
+
+
 def _count_duplicates(
     collection: Any,
     id_embeddings: List[tuple[str, List[float]]],
     where: Optional[Dict[str, Any]] = None,
-) -> int:
+) -> tuple[int, int]:
     duplicate_pairs: set[tuple[str, str]] = set()
+    scan_errors = 0
     for anchor_id, embedding in id_embeddings:
+        coerced_embedding = _coerce_embedding(embedding)
+        if coerced_embedding is None:
+            scan_errors += 1
+            continue
         query_kwargs: Dict[str, Any] = {
-            "query_embeddings": [embedding],
+            "query_embeddings": [coerced_embedding],
             "n_results": 4,
         }
         if where:
             query_kwargs["where"] = where
-        results = collection.query(**query_kwargs)
-        ids = results.get("ids", [[]])[0]
-        distances = results.get("distances", [[]])[0]
+        try:
+            results = collection.query(**query_kwargs)
+        except Exception:
+            scan_errors += 1
+            continue
+        raw_ids = results.get("ids", [[]])
+        raw_distances = results.get("distances", [[]])
+        if not raw_ids or not raw_distances:
+            continue
+        ids = raw_ids[0] or []
+        distances = raw_distances[0] or []
         for candidate_id, distance in zip(ids, distances):
             if candidate_id == anchor_id:
                 continue
             similarity = 1.0 - float(distance)
             if similarity > 0.95:
                 duplicate_pairs.add(tuple(sorted((anchor_id, candidate_id))))
-    return len(duplicate_pairs)
+    return len(duplicate_pairs), scan_errors
