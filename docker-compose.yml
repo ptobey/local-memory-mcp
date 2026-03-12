@@ -1,0 +1,20 @@
+services:
+  local-memory-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: local-memory-mcp:latest
+    container_name: local-memory-mcp
+    ports:
+      - "8000:8000"
+    environment:
+      MCP_BIND_HOST: 0.0.0.0
+      MCP_BIND_PORT: 8000
+    volumes:
+      - local_memory_chroma_db:/app/chroma_db
+      - local_memory_backups:/app/backups
+    restart: unless-stopped
+
+volumes:
+  local_memory_chroma_db:
+  local_memory_backups:

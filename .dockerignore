@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+server.log
+chroma_db
+backups
+config.json
+.env
+.env.*
+.vscode
+.claude

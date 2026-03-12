@@ -96,6 +96,20 @@ If you need remote callback-based integrations:
 
 For ChatGPT custom app and Claude Desktop integration details, see [`docs/integrations.md`](integrations.md).
 
+## 8. Docker (optional)
+If you prefer containerized runtime, use Docker for HTTP/SSE MCP:
+
+```bash
+docker build -t local-memory-mcp:latest .
+docker run --rm -p 8000:8000 \
+  -v local_memory_chroma_db:/app/chroma_db \
+  -v local_memory_backups:/app/backups \
+  local-memory-mcp:latest
+```
+
+Stdio in Docker is possible but less ergonomic for desktop clients.
+Details: [`docs/docker.md`](docker.md).
+
 ## Local Data And Git Hygiene
 - Local memory DB and backups are ignored by git.
 - `config.json` is ignored by git and intended for local machine settings only.

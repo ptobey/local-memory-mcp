@@ -135,6 +135,25 @@ SSE endpoints:
 - Keep relay scripts/config in a separate folder outside this repository.
 - Point the relay to `http://localhost:8000`.
 
+## Docker (Optional)
+Docker is best for HTTP/SSE MCP usage (`/mcp`, `/sse`, `/messages/`).
+
+Build:
+```bash
+docker build -t local-memory-mcp:latest .
+```
+
+Run:
+```bash
+docker run --rm -p 8000:8000 \
+  -v local_memory_chroma_db:/app/chroma_db \
+  -v local_memory_backups:/app/backups \
+  local-memory-mcp:latest
+```
+
+Stdio can run in Docker with `-i`, but local Python entrypoints are usually simpler for desktop stdio clients.
+See [`docs/docker.md`](docs/docker.md) for full details.
+
 ## Example Workflow
 ### 1. Store memory
 ```text
@@ -194,6 +213,7 @@ This v1 release was developed with an AI-assisted coding workflow. Product direc
 - Integration guide (ChatGPT + Claude Desktop): [`docs/integrations.md`](docs/integrations.md)
 - Architecture details: [`docs/architecture.md`](docs/architecture.md)
 - AIX notes: [`docs/aix.md`](docs/aix.md)
+- Docker guide: [`docs/docker.md`](docs/docker.md)
 - Limitations: [`docs/limitations.md`](docs/limitations.md)
 - Roadmap: [`docs/roadmap.md`](docs/roadmap.md)
 - Security policy: [`SECURITY.md`](SECURITY.md)
