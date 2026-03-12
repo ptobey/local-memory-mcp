@@ -123,6 +123,41 @@ No public endpoint is "completely secure." The goal is strong practical hardenin
 8. Keep relay config/secrets outside this repository.
 9. Disable tunnel when not actively using remote integration.
 
+## 4. Troubleshooting: `Invalid host header`
+
+If MCP calls (for example `self_check` or `get_issues`) fail with `Invalid host header`, the request `Host` value is not in your `MCP_ALLOWED_HOSTS` list.
+
+Most common case: public tunnel domain (for example ngrok) is not allowed while local hosts are allowed.
+
+Recommended secure fix:
+
+1. Use `MCP_AUTH_MODE="oauth"` for exposed endpoints.
+2. Add your public tunnel/domain host to `MCP_ALLOWED_HOSTS`.
+3. Add the corresponding `https://` origin to `MCP_ALLOWED_ORIGINS`.
+4. Restart `run_mcp_v5_sse_actions.py` after config changes.
+
+Example host/origin additions:
+
+```json
+{
+  "MCP_ALLOWED_HOSTS": [
+    "127.0.0.1:*",
+    "localhost:*",
+    "[::1]:*",
+    "<your-public-domain>",
+    "<your-public-domain>:*"
+  ],
+  "MCP_ALLOWED_ORIGINS": [
+    "http://127.0.0.1:*",
+    "http://localhost:*",
+    "http://[::1]:*",
+    "https://<your-public-domain>"
+  ]
+}
+```
+
+Important: if `MCP_AUTH_MODE="none"`, non-local hosts/origins are intentionally blocked by startup validation.
+
 ## References
 
 - OpenAI: Connect from ChatGPT to a custom MCP server  

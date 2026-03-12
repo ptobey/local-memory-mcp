@@ -169,7 +169,8 @@ def _trusted_hosts_from_config() -> list[str]:
     return cleaned
 
 
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=_trusted_hosts_from_config())
+_trusted_hosts = _trusted_hosts_from_config()
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=_trusted_hosts)
 _mounted_paths: set[str] = set()
 for transport_app in (_sse_app, _streamable_http_app):
     for route in transport_app.routes:
@@ -200,6 +201,8 @@ if __name__ == "__main__":
     print("=" * 60)
     print("Second Brain v5 - MCP HTTP/SSE Server")
     print("=" * 60)
+    print(f"Auth Mode: {_auth_mode}")
+    print(f"Trusted Hosts: {', '.join(_trusted_hosts)}")
     print(f"Streamable HTTP: http://{bind_host}:{bind_port}/mcp")
     print(f"SSE: http://{bind_host}:{bind_port}/sse")
     print(f"Messages: http://{bind_host}:{bind_port}/messages/")
