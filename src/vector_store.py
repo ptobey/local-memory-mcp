@@ -37,6 +37,15 @@ def _parse_iso_dt(value: str) -> Optional[datetime]:
         return None
 
 
+def _compute_recency_score(last_modified: str) -> float:
+    """1.0 = today, decays linearly to 0.0 at 365 days old, clamped at 0.0."""
+    dt = _parse_iso_dt(last_modified)
+    if not dt:
+        return 0.0
+    days_old = (datetime.now(timezone.utc) - dt).total_seconds() / 86400
+    return round(max(0.0, 1.0 - days_old / 365), 4)
+
+
 def _tokenize_for_ranking(text: str) -> List[str]:
     stop_words = {
         "the",
@@ -515,6 +524,9 @@ class VectorStore:
             item["rank_score"] = (
                 float(item["score"]) + lexical_bonus + recency_bonus + update_style_bonus
             )
+            item["recency_score"] = _compute_recency_score(
+                item.get("last_modified") or item.get("timestamp") or ""
+            )
 
         output.sort(
             key=lambda item: (
@@ -543,6 +555,47 @@ class VectorStore:
             metadatas.append(_normalize_metadata(metadata))
         if ids:
             self.collection.update(ids=ids, metadatas=metadatas)
+
+    def get_recent(
+        self,
+        n: int = 10,
+        include_deprecated: bool = False,
+    ) -> Dict[str, Any]:
+        result = self.collection.get(include=["documents", "metadatas"])
+        ids = result.get("ids") or []
+        documents = result.get("documents") or []
+        metadatas = result.get("metadatas") or []
+        chunks = []
+        for chunk_id, text, metadata in zip(ids, documents, metadatas):
+            metadata = metadata or {}
+            if not include_deprecated and metadata.get("deprecated", False):
+                continue
+            last_modified = str(metadata.get("last_modified", "") or "")
+            timestamp = str(metadata.get("timestamp", "") or "")
+            chunks.append(
+                {
+                    "chunk_id": chunk_id,
+                    "text": text,
+                    "last_modified": last_modified,
+                    "timestamp": timestamp,
+                    "recency_score": _compute_recency_score(last_modified or timestamp),
+                    "deprecated": bool(metadata.get("deprecated", False)),
+                    "supersedes": str(metadata.get("supersedes", "") or ""),
+                    "source_type": str(metadata.get("source_type", "") or ""),
+                    "word_count": int(metadata.get("word_count", 0) or 0),
+                    "confidence": float(metadata.get("confidence", 1.0)),
+                }
+            )
+        chunks.sort(
+            key=lambda x: x.get("last_modified") or x.get("timestamp") or "",
+            reverse=True,
+        )
+        return {
+            "as_of": _now_iso(),
+            "total_returned": min(n, len(chunks)),
+            "total_active": len(chunks),
+            "chunks": chunks[:n],
+        }
 
     def get_evolution_chain(self, chunk_id: str) -> List[Dict[str, Any]]:
         result = self.collection.get(include=["documents", "metadatas"])

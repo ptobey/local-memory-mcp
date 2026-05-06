@@ -862,8 +862,10 @@ def search(
     - status updates ("now", "as of", "no longer", "eliminated", etc.)
 
     Search results include fields to help choose canonical/current chunks:
-    timestamp, last_modified, source_type, supersedes, deprecated.
-    Use them to identify the most recent active state before writing updates.
+    timestamp, last_modified, source_type, supersedes, deprecated, recency_score.
+    recency_score is 1.0 for today and decays to 0.0 at 365 days old — use it
+    alongside rank_score to treat the most recently modified chunk as source of truth
+    when multiple chunks conflict on the same topic.
     """
     store_instance, _, _ = _ensure_ready()
     results = store_instance.search(
@@ -1163,6 +1165,24 @@ def resolve_conflicts(conflict_ids: Optional[List[str]] = None) -> Dict[str, Any
     """
     store_instance, _, _ = _ensure_ready()
     return store_instance.resolve_conflicts(conflict_ids=conflict_ids)
+
+
+@mcp.tool()
+def get_recent(
+    n: int = 10,
+    include_deprecated: bool = False,
+) -> Dict[str, Any]:
+    """
+    Get the N most recently added or modified chunks, sorted by last_modified descending.
+
+    Call this at session start to orient to recent state without needing to know
+    what to search for. Each chunk includes recency_score (1.0 = today, 0.0 = 1 year ago).
+
+    When multiple chunks conflict on the same topic, the chunk with the highest
+    recency_score is the source of truth.
+    """
+    store_instance, _, _ = _ensure_ready()
+    return store_instance.get_recent(n=n, include_deprecated=include_deprecated)
 
 
 @mcp.tool()
