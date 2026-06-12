@@ -6,7 +6,7 @@ No cloud. No subscription. No account. Your data stays on your machine.
 
 `local-memory-mcp` gives Claude, ChatGPT, and other MCP-compatible assistants a persistent memory layer powered by local vector search (ChromaDB). Tell it something once. It remembers across sessions.
 
-<!-- demo GIF goes here -->
+![demo](demo.gif)
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
