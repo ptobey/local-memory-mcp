@@ -1,23 +1,51 @@
-# Local Memory MCP v1
+# local-memory-mcp
 
-## What Is This?
-Local Memory MCP v1 is a local-first personal RAG memory system for AI assistants.  
-It stores text chunks plus lightweight metadata in a local ChromaDB, then exposes MCP tools so a new LLM session can quickly recover user context.
+**AI assistants forget everything when the conversation ends. This fixes that — locally.**
 
-This project is built for technical users who want to self-host and control their own data. It is not a SaaS product.
+No cloud. No subscription. No account. Your data stays on your machine.
 
-## AIX Philosophy
-AIX (AI eXperience) means designing for how LLMs actually consume context:
+`local-memory-mcp` gives Claude, ChatGPT, and other MCP-compatible assistants a persistent memory layer powered by local vector search (ChromaDB). Tell it something once. It remembers across sessions.
 
-- Prefer clear text chunks over rigid document schemas.
-- Keep metadata minimal but useful: timestamps, confidence, supersedes links, deprecation flags.
-- Preserve history with version chains instead of destructive overwrites.
-- Return warning-rich tool responses so the model can self-correct write behavior.
+<!-- demo GIF goes here -->
 
-The goal is practical retrieval quality and reliable AI behavior, not perfect human taxonomies.
+![Python](https://img.shields.io/badge/python-3.11+-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Stars](https://img.shields.io/github/stars/ptobey/local-memory-mcp)
 
-## How It Works
-```text
+---
+
+## The problem it solves
+
+Every new Claude or ChatGPT session starts blank. Your preferences, your project context, your decisions — gone. You re-explain yourself constantly.
+
+local-memory-mcp is a local MCP server that lets your AI assistant:
+
+- Store things worth remembering ("my deep work block is 6:30–9 AM")
+- Retrieve relevant context at the start of any new session
+- Version and supersede memories as your situation changes
+- Never send your data anywhere
+
+It's the memory layer AI assistants should have built in, but don't.
+
+---
+
+## Quickstart (Docker — 2 minutes)
+
+```bash
+git clone https://github.com/ptobey/local-memory-mcp.git
+cd local-memory-mcp
+docker compose up --build -d
+```
+
+Then point your MCP client at `http://localhost:8000/mcp`. Done.
+
+→ [Claude Desktop setup](docs/integrations.md) · [ChatGPT setup](docs/integrations.md) · [Manual Python install](docs/setup.md)
+
+---
+
+## How it works
+
+```
 [Assistant via MCP Client]
             |
             v
@@ -27,209 +55,86 @@ The goal is practical retrieval quality and reliable AI behavior, not perfect hu
       [src/mcp_server_v1.py]
         /          |          \
        v           v           v
-[src/vector_store.py] [src/reconciliation.py] [src/health_monitor.py]
+[vector_store.py] [reconciliation.py] [health_monitor.py]
        |                   |
        v                   v
- [Local ChromaDB]   [Reconciliation Log Collection]
+ [Local ChromaDB]   [Reconciliation Log]
 ```
 
-Write path:
-1. `store` or `update` writes a chunk.
-2. Reconciliation checks for overlap/conflict signals.
-3. The system returns warnings/self-heal hints when writes look risky.
+**Write path:** `store`/`update` writes a chunk → reconciliation checks for overlap/conflict → returns warnings and self-heal hints when a write looks risky.
 
-Read path:
-1. `search` runs semantic retrieval.
-2. Ranking blends similarity with lightweight lexical/recency signals.
-3. Deprecated chunks stay hidden by default unless explicitly requested.
+**Read path:** `search` runs semantic retrieval → ranking blends similarity with lightweight lexical/recency signals → deprecated chunks stay hidden unless explicitly requested.
+
+---
 
 ## Features
-Current v1 capabilities:
 
-- MCP tools for `store`, `search`, `update`, `delete`, `get_chunk`, `get_evolution_chain`.
-- Versioned updates (`strategy="version"`) with supersedes chains.
-- Soft delete by default (history retained), optional hard delete.
-- Heuristic reconciliation and conflict logging.
-- Warning-first write responses with structured `warnings[]` and self-heal fields.
-- Health checks for oversized chunks and unresolved conflicts.
-- Local backup/restore commands for the persisted vector DB.
-- Stdio transport and SSE transport for MCP clients.
-- Optional auth modes for SSE: `none` (local-only), `bearer`, or `oauth`.
+- MCP tools: `store`, `search`, `update`, `delete`, `get_chunk`, `get_evolution_chain`
+- Versioned updates (`strategy="version"`) with supersedes chains
+- Soft delete by default (history retained), optional hard delete
+- Heuristic reconciliation and conflict logging
+- Warning-first write responses with structured `warnings[]` and self-heal fields
+- Health checks for oversized chunks and unresolved conflicts
+- Local backup/restore for the persisted vector DB
+- Stdio and SSE transports
+- Optional SSE auth: `none` (local-only), `bearer`, or `oauth`
 
-## Quickstart
-Use one of the two paths below.
-If you are unsure, choose Path A (Docker).
+---
 
-### Path A (Recommended Easiest): Docker
-Best for most users. This avoids local Python/venv setup.
+## The design idea behind it (AIX)
 
-Prerequisite:
-- Docker Desktop (or Docker Engine) is installed and running.
+AIX (AI eXperience) means designing for how LLMs actually consume context, not how humans file documents:
 
-1. Clone the repo:
-```bash
-git clone <your-repo-url>
-cd local-memory-mcp
-```
+- Prefer clear text chunks over rigid document schemas
+- Keep metadata minimal but useful: timestamps, confidence, supersedes links, deprecation flags
+- Preserve history with version chains instead of destructive overwrites
+- Return warning-rich tool responses so the model can self-correct
 
-2. Start the service:
-```bash
-docker compose up --build -d
-```
+The goal is practical retrieval quality and reliable AI behavior, not perfect human taxonomies.
 
-3. Verify endpoints:
-- `http://localhost:8000/mcp`
-- `http://localhost:8000/sse`
-- `http://localhost:8000/messages/`
-- `http://localhost:8000/health`
+---
 
-4. Stop when finished:
-```bash
-docker compose down
-```
+## Example workflow
 
-For config mounts, volumes, and stdio-in-Docker details, see [`docs/docker.md`](docs/docker.md).
+**Store a memory:**
 
-### Path B: Local Python Install
-Use this when you want direct local Python control and stdio-first desktop workflows.
-
-Prerequisites:
-- Python 3.11+
-- `pip`
-- Windows PowerShell or a POSIX shell
-
-1. Clone and install dependencies:
-
-```bash
-git clone <your-repo-url>
-cd local-memory-mcp
-python -m venv .venv
-```
-
-Windows:
-```powershell
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-macOS/Linux:
-```bash
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-2. Ensure the embedding model is available locally (one-time):
-
-```bash
-python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
-```
-
-3. Optional: create a local config override (kept out of git):
-
-Windows PowerShell:
-```powershell
-Copy-Item config.example.json config.json
-```
-
-macOS/Linux:
-```bash
-cp config.example.json config.json
-```
-
-If you skip this, built-in defaults are used (local-first, `MCP_AUTH_MODE=none`).
-
-4. Run a direct local verification (no MCP client required yet):
-
-```bash
-python examples/try_local.py
-```
-
-This performs one write and one retrieval, and creates `./chroma_db` automatically on first write.
-
-5. Run MCP over stdio (recommended starting point for local runtime):
-
-```bash
-python run_mcp_v1_stdio.py
-```
-
-6. Optional: run SSE server:
-
-```bash
-python run_mcp_v1_http_sse.py
-```
-
-7. Optional: expose SSE through an external relay workspace:
-
-- Keep relay scripts/config in a separate folder outside this repository.
-- Point the relay to `http://localhost:8000`.
-
-## Example Workflow
-### 1. Store memory
-```text
+```json
 tool: store
-input: {
-  "text": "Example user context: weekday focus block is 6:30-9:00 AM as the current default schedule."
-}
+input: { "text": "Weekday focus block is 6:30-9:00 AM, current default schedule." }
 ```
 
-### 2. Retrieve memory
-```text
+**Retrieve it later:**
+
+```json
 tool: search
-input: {
-  "query": "current deep work schedule",
-  "top_k": 5
-}
+input: { "query": "current deep work schedule", "top_k": 5 }
 ```
 
-### 3. Bootstrap a new LLM session
-Use a focused retrieval pass, then summarize:
+**Bootstrap a new session** by running a few focused retrievals, then synthesizing only active, non-deprecated chunks into a short brief for the new model instance. More flows in [`examples/`](examples).
 
-```text
-search("current work schedule and constraints")
-search("active priorities this month")
-search("current preferences and hard boundaries")
-```
+---
 
-Then synthesize only active, non-deprecated chunks into a short session brief for the new model instance.
+## Privacy & deployment
 
-More sample chunks and retrieval flows are in [`examples/`](examples).
+- Local-first and user-controlled by default
+- Data stored in local ChromaDB files under the configured persist directory
+- No cloud backend required; optional remote access via user-managed tunneling
+- Never commit real secrets — use local config/env values
 
-## Local Data And Git Hygiene
-- Real memory data is stored in `./chroma_db` by default and is generated locally at runtime.
-- Local DB and backup folders are ignored by git (`chroma_db/`, `backups/`, and common DB file extensions).
-- `config.json` is treated as local machine config and is ignored by git.
-- Keep commit-safe templates in `config.example.json` and `.env.example`.
-
-## Privacy And Deployment
-- Default posture is local-first and user-controlled.
-- Data is stored in local ChromaDB files under the configured persist directory.
-- The server itself does not require a cloud backend.
-- Optional remote access is available through user-managed tunneling.
-- Do not commit real secrets. Use local config/env values for auth credentials.
-
-## Open Source Status
-This is an early but usable v1 release.
-
-- Stable enough for personal self-hosted workflows.
-- APIs and internal heuristics may still change between minor versions.
-- Some rough edges are documented in [`docs/limitations.md`](docs/limitations.md).
-
-## Build Provenance
-This v1 release was developed with an AI-assisted coding workflow. Product direction, constraints, and final implementation decisions were led by Patrick Tobey.
+---
 
 ## Documentation
-- Setup guide: [`docs/setup.md`](docs/setup.md)
-- Integration guide (ChatGPT + Claude Desktop): [`docs/integrations.md`](docs/integrations.md)
-- Architecture details: [`docs/architecture.md`](docs/architecture.md)
-- AIX notes: [`docs/aix.md`](docs/aix.md)
-- Docker guide: [`docs/docker.md`](docs/docker.md)
-- Limitations: [`docs/limitations.md`](docs/limitations.md)
-- Roadmap: [`docs/roadmap.md`](docs/roadmap.md)
-- Security policy: [`SECURITY.md`](SECURITY.md)
-- Code of conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
 
-## Contributing
-See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- [Setup guide](docs/setup.md)
+- [Integrations (Claude Desktop + ChatGPT)](docs/integrations.md)
+- [Architecture](docs/architecture.md)
+- [AIX notes](docs/aix.md)
+- [Docker guide](docs/docker.md)
+- [Limitations](docs/limitations.md)
+- [Roadmap](docs/roadmap.md)
+
+---
 
 ## License
+
 MIT. See [`LICENSE`](LICENSE).
