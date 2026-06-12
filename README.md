@@ -1,6 +1,6 @@
 # local-memory-mcp
 
-**AI assistants forget everything when the conversation ends. This fixes that — locally.**
+**AI assistants forget everything when the conversation ends. This fixes that - locally.**
 
 No cloud. No subscription. No account. Your data stays on your machine.
 
@@ -16,7 +16,7 @@ No cloud. No subscription. No account. Your data stays on your machine.
 
 ## The problem it solves
 
-Every new Claude or ChatGPT session starts blank. Your preferences, your project context, your decisions — gone. You re-explain yourself constantly.
+Every new Claude or ChatGPT session starts blank. Your preferences, your project context, your decisions - gone. You re-explain yourself constantly.
 
 local-memory-mcp is a local MCP server that lets your AI assistant:
 
@@ -29,7 +29,7 @@ It's the memory layer AI assistants should have built in, but don't.
 
 ---
 
-## Quickstart (Docker — 2 minutes)
+## Quickstart (Docker - 2 minutes)
 
 ```bash
 git clone https://github.com/ptobey/local-memory-mcp.git
@@ -119,7 +119,7 @@ input: { "query": "current deep work schedule", "top_k": 5 }
 - Local-first and user-controlled by default
 - Data stored in local ChromaDB files under the configured persist directory
 - No cloud backend required; optional remote access via user-managed tunneling
-- Never commit real secrets — use local config/env values
+- Never commit real secrets - use local config/env values
 
 ---
 
