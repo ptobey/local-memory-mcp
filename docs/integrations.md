@@ -52,10 +52,18 @@ If you keep `MCP_AUTH_MODE="none"` while adding non-local hosts/origins, startup
 
 ### Step B: Run local MCP HTTP/SSE server
 
+Windows (PowerShell):
+
 ```powershell
 $env:MCP_BIND_HOST = "127.0.0.1"
 $env:MCP_BIND_PORT = "8000"
 .\.venv\Scripts\python.exe run_mcp_v1_http_sse.py
+```
+
+macOS / Linux:
+
+```bash
+MCP_BIND_HOST=127.0.0.1 MCP_BIND_PORT=8000 .venv/bin/python run_mcp_v1_http_sse.py
 ```
 
 This server now exposes:
@@ -88,24 +96,47 @@ You can use any equivalent tunnel provider. The key requirement is a stable HTTP
 
 For Claude Desktop, do not expose anything publicly. Use local stdio.
 
-Windows config path:
+### Config file location
 
-- `C:\Users\<you>\AppData\Roaming\Claude\claude_desktop_config.json`
+**Windows:** `C:\Users\<you>\AppData\Roaming\Claude\claude_desktop_config.json`
 
-Example config:
+**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+**Linux:** `~/.config/Claude/claude_desktop_config.json`
+
+### Example config
+
+**Windows:**
 
 ```json
 {
   "mcpServers": {
     "local-memory-mcp-v1": {
-      "command": "C:\\Users\\<you>\\OneDrive\\Desktop\\local-memory-mcp\\.venv\\Scripts\\python.exe",
+      "command": "C:\\Users\\<you>\\local-memory-mcp\\.venv\\Scripts\\python.exe",
       "args": [
-        "C:\\Users\\<you>\\OneDrive\\Desktop\\local-memory-mcp\\run_mcp_v1_stdio.py"
+        "C:\\Users\\<you>\\local-memory-mcp\\run_mcp_v1_stdio.py"
       ]
     }
   }
 }
 ```
+
+**macOS / Linux:**
+
+```json
+{
+  "mcpServers": {
+    "local-memory-mcp-v1": {
+      "command": "/Users/<you>/local-memory-mcp/.venv/bin/python",
+      "args": [
+        "/Users/<you>/local-memory-mcp/run_mcp_v1_stdio.py"
+      ]
+    }
+  }
+}
+```
+
+Replace `/Users/<you>/local-memory-mcp` with the actual path where you cloned the repo. On Linux, swap `/Users/<you>` for `/home/<you>`.
 
 Then restart Claude Desktop.
 
