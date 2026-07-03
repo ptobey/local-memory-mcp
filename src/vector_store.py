@@ -1,6 +1,8 @@
 import json
+import math
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +11,16 @@ from uuid import uuid4
 
 os.environ.setdefault("CHROMA_TELEMETRY_DISABLED", "1")
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
+# HuggingFace offline flags MUST be set before huggingface_hub is imported
+# (via sentence_transformers below) — otherwise the offline constant is baked
+# in as False and every model load makes network cache-validation calls.
+# setdefault (not hard-set) so a caller can still opt into online mode by
+# exporting HF_HUB_OFFLINE=0 before import (e.g. to download a new reranker).
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
 try:
     import chromadb  # type: ignore
@@ -172,6 +184,12 @@ def _load_config() -> Dict[str, Any]:
     default = {
         "CHROMADB_PERSIST_DIR": default_chroma_path,
         "EMBEDDING_MODEL": "all-MiniLM-L6-v2",
+        # Two-stage retrieval: bi-encoder narrows a wide pool, cross-encoder
+        # reorders it. RERANK_ENABLED turns the second pass on for AI-facing
+        # search; RERANK_OVERFETCH is the pool multiplier (pool = top_k * this).
+        "RERANK_ENABLED": True,
+        "RERANKER_MODEL": "BAAI/bge-reranker-v2-m3",
+        "RERANK_OVERFETCH": 5,
         "RECONCILIATION_THRESHOLD": 0.85,
         "AUTO_MERGE_THRESHOLD": 0.95,
         "LLM_PROVIDER": "anthropic",
@@ -250,16 +268,56 @@ class ChunkRecord:
 
 class EmbeddingManager:
     def __init__(self, model_name: Optional[str] = None):
+        # HF offline flags are set at module import (top of this file), which is
+        # early enough to actually take effect. Setting them here would be too late.
         config = _load_config()
-        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-        os.environ.setdefault("HF_HUB_OFFLINE", "1")
-        os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
-        os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
         self.model_name = model_name or config["EMBEDDING_MODEL"]
         self.model = SentenceTransformer(self.model_name)
 
     def embed_text(self, text: str) -> List[float]:
         return self.model.encode([text])[0].tolist()
+
+
+# --- Cross-encoder reranker: loaded once per process, kept warm. -------------
+# The MCP server is long-lived, so we cache the model on first use and reuse it
+# for every subsequent search. If a model can't be loaded (offline, not yet
+# downloaded, bad name), we remember the failure and fall back to plain
+# bi-encoder ordering so search never hard-fails.
+_RERANKER_CACHE: Dict[str, Any] = {}
+_RERANKER_FAILED: set = set()
+
+
+def _get_reranker(model_name: str):
+    """Return a warm CrossEncoder for `model_name`, or None if unavailable."""
+    if not model_name or model_name in _RERANKER_FAILED:
+        return None
+    cached = _RERANKER_CACHE.get(model_name)
+    if cached is not None:
+        return cached
+    try:
+        from sentence_transformers import CrossEncoder
+        model = CrossEncoder(model_name)
+        _RERANKER_CACHE[model_name] = model
+        print(f"[reranker] loaded {model_name!r} (warm for process lifetime)", file=sys.stderr)
+        return model
+    except Exception as exc:
+        print(
+            f"[reranker] could not load {model_name!r}: {exc}. "
+            "Falling back to bi-encoder ordering. "
+            "(Pre-download the model once if the store runs offline.)",
+            file=sys.stderr,
+        )
+        _RERANKER_FAILED.add(model_name)
+        return None
+
+
+def _sigmoid(x: float) -> float:
+    """Map a cross-encoder logit to a readable 0..1 relevance score.
+    Monotonic, so it never changes ordering — purely for legibility."""
+    try:
+        return 1.0 / (1.0 + math.exp(-x))
+    except OverflowError:
+        return 0.0 if x < 0 else 1.0
 
 
 class VectorStore:
@@ -279,6 +337,12 @@ class VectorStore:
         config = _load_config()
         self.persist_dir = persist_dir or config["CHROMADB_PERSIST_DIR"]
         self.enable_access_tracking = bool(config["ENABLE_ACCESS_TRACKING"])
+        self.rerank_enabled = bool(config.get("RERANK_ENABLED", True))
+        self.reranker_model = str(config.get("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"))
+        try:
+            self.rerank_overfetch = max(1, int(config.get("RERANK_OVERFETCH", 5)))
+        except (TypeError, ValueError):
+            self.rerank_overfetch = 5
         self.client = self._build_client(self.persist_dir)
         disabled_embedding = _DisabledEmbeddingFunction()
         self.collection = self.client.get_or_create_collection(
@@ -440,7 +504,17 @@ class VectorStore:
         top_k: int = 5,
         min_confidence: float = 0.0,
         include_deprecated: bool = False,
+        use_reranker: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
+        # Two-stage retrieval:
+        #   stage 1 (bi-encoder) — overfetch a WIDE pool of top_k * overfetch
+        #     candidates cheaply, so the reranker has enough to work with.
+        #   stage 2 (cross-encoder) — reorder that pool precisely, keep top_k.
+        # use_reranker=None -> follow config (RERANK_ENABLED). Internal callers
+        # (duplicate detection) pass use_reranker=False to keep the original
+        # bi-encoder score semantics their thresholds depend on.
+        do_rerank = self.rerank_enabled if use_reranker is None else bool(use_reranker)
+
         embedding = self.embedding_manager.embed_text(query)
         query_tokens = set(_tokenize_for_ranking(query))
         time_sensitive = _is_time_sensitive_query(query)
@@ -450,7 +524,9 @@ class VectorStore:
         total = self._collection_count()
         if total == 0:
             return []
-        n_results = min(top_k, total)
+        # Overfetch the pool when reranking; otherwise just top_k as before.
+        pool_size = top_k * self.rerank_overfetch if do_rerank else top_k
+        n_results = min(pool_size, total)
         query_kwargs = {"query_embeddings": [embedding], "n_results": n_results}
         if where:
             query_kwargs["where"] = where
@@ -494,6 +570,38 @@ class VectorStore:
                     "query_overlap": lexical_overlap,
                 }
             )
+        # --- Stage 2: cross-encoder rerank (rerank score ALONE decides order) ---
+        # We deliberately do NOT blend in the bi-encoder score, lexical overlap,
+        # or recency here. recency_score is still attached below as an
+        # informational field the AI can read, but it does not reorder results.
+        reranker = _get_reranker(self.reranker_model) if do_rerank else None
+        if reranker is not None and output:
+            pairs = [(query, item["text"]) for item in output]
+            try:
+                raw_scores = reranker.predict(pairs, show_progress_bar=False)
+            except Exception as exc:
+                print(f"[reranker] predict failed: {exc}; using bi-encoder order", file=sys.stderr)
+                raw_scores = None
+            if raw_scores is not None:
+                for item, raw in zip(output, raw_scores):
+                    rerank_score = _sigmoid(float(raw))
+                    item["rerank_score"] = rerank_score
+                    # rank_score always means "the score that set final order".
+                    item["rank_score"] = rerank_score
+                    item["reranked"] = True
+                    item["recency_score"] = _compute_recency_score(
+                        item.get("last_modified") or item.get("timestamp") or ""
+                    )
+                output.sort(
+                    key=lambda item: (item["rerank_score"], item["score"]),
+                    reverse=True,
+                )
+                output = output[:top_k]
+                if self.enable_access_tracking and output:
+                    self._bump_access(output)
+                return output
+            # raw_scores is None -> fall through to bi-encoder ranking below.
+
         recency_range: Optional[tuple[datetime, datetime]] = None
         if time_sensitive and output:
             parsed_times = []

@@ -654,7 +654,14 @@ def _find_update_candidates(
     include_deprecated: bool = False,
 ) -> List[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
-    similar = store_instance.search(query=text, top_k=top_k, include_deprecated=include_deprecated)
+    # Duplicate/update detection relies on raw bi-encoder score + rank_score
+    # thresholds, so keep this path off the reranker (which rewrites rank_score).
+    similar = store_instance.search(
+        query=text,
+        top_k=top_k,
+        include_deprecated=include_deprecated,
+        use_reranker=False,
+    )
     for item in similar:
         candidates.append(_candidate_from_search_result(item))
     return candidates
@@ -730,6 +737,12 @@ def store(text: str) -> Dict[str, Any]:
     You decide how to chunk this information.
     Aim for 150-300 words per chunk for best retrieval.
     Chunks over 500 words will be flagged during health checks.
+
+    IMPORTANT — token efficiency: Write every chunk in as few tokens as possible without
+    losing meaning. Strip filler phrases, redundant context, and verbose transitions. Use
+    abbreviations, bullet lists, and compact notation (e.g. "PHX" not "Phoenix, Arizona").
+    Prefer terse key:value or label: fact style over full sentences where meaning is
+    preserved. Every word must earn its place.
     """
     _log(f"[STORE] Adding text: {text[:100]}...")
     store_instance, reconciler, _ = _ensure_ready()
@@ -855,6 +868,12 @@ def search(
     """
     Semantic search for existing memory.
 
+    Just pass a natural-language query and how many results you want (top_k).
+    Retrieval is two-stage under the hood and needs no tuning from you: a fast
+    bi-encoder pulls a wide candidate pool (top_k * overfetch), then a
+    cross-encoder reranker reorders that pool and returns the top_k. Ask for the
+    number of results you actually want; the wider pool is handled internally.
+
     Use this before store()/update() when handling:
     - decisions and decision hierarchy changes
     - preference changes
@@ -863,9 +882,10 @@ def search(
 
     Search results include fields to help choose canonical/current chunks:
     timestamp, last_modified, source_type, supersedes, deprecated, recency_score.
-    recency_score is 1.0 for today and decays to 0.0 at 365 days old — use it
-    alongside rank_score to treat the most recently modified chunk as source of truth
-    when multiple chunks conflict on the same topic.
+    recency_score is 1.0 for today and decays to 0.0 at 365 days old. Final
+    ordering is decided by the reranker alone; recency_score is informational —
+    use it to pick the current source of truth when several chunks conflict on
+    the same topic.
     """
     store_instance, _, _ = _ensure_ready()
     results = store_instance.search(
@@ -980,6 +1000,12 @@ def update(chunk_id: str, new_text: str, strategy: str = "version") -> Dict[str,
     Prefer warnings[], warning_summary, and warning_context for issue handling.
     The response always includes self-heal fields; if self_heal_required=true,
     complete remediation before finalizing the user-facing response.
+
+    IMPORTANT — token efficiency: Write new_text in as few tokens as possible without
+    losing meaning. Strip filler phrases, redundant context, and verbose transitions. Use
+    abbreviations, bullet lists, and compact notation (e.g. "PHX" not "Phoenix, Arizona").
+    Prefer terse key:value or label: fact style over full sentences where meaning is
+    preserved. Every word must earn its place.
     """
     return update_chunk(chunk_id=chunk_id, new_text=new_text, strategy=strategy)
 
