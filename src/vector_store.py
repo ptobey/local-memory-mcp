@@ -188,7 +188,7 @@ def _load_config() -> Dict[str, Any]:
         # reorders it. RERANK_ENABLED turns the second pass on for AI-facing
         # search; RERANK_OVERFETCH is the pool multiplier (pool = top_k * this).
         "RERANK_ENABLED": True,
-        "RERANKER_MODEL": "BAAI/bge-reranker-v2-m3",
+        "RERANKER_MODEL": "cross-encoder/ms-marco-MiniLM-L-6-v2",
         "RERANK_OVERFETCH": 5,
         "RECONCILIATION_THRESHOLD": 0.85,
         "AUTO_MERGE_THRESHOLD": 0.95,
@@ -338,7 +338,7 @@ class VectorStore:
         self.persist_dir = persist_dir or config["CHROMADB_PERSIST_DIR"]
         self.enable_access_tracking = bool(config["ENABLE_ACCESS_TRACKING"])
         self.rerank_enabled = bool(config.get("RERANK_ENABLED", True))
-        self.reranker_model = str(config.get("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"))
+        self.reranker_model = str(config.get("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"))
         try:
             self.rerank_overfetch = max(1, int(config.get("RERANK_OVERFETCH", 5)))
         except (TypeError, ValueError):
