@@ -81,6 +81,7 @@ class _OAuthClientAuthenticator:
 if _auth_provider is not None:
     from mcp.server.auth.handlers.token import TokenErrorResponse, TokenHandler
     from mcp.server.auth.json_response import PydanticJSONResponse
+    from starlette.responses import RedirectResponse
 
     _token_handler = TokenHandler(_auth_provider, _OAuthClientAuthenticator(_auth_provider))
 
@@ -100,6 +101,19 @@ if _auth_provider is not None:
                     "Pragma": "no-cache",
                 },
             )
+
+    # Some MCP clients (e.g. claude.ai) call /oauth/authorize and /oauth/token
+    # instead of the RFC-8414-advertised /authorize and /token. Forward those
+    # to the real handlers so those clients can complete the OAuth flow.
+    @app.get("/oauth/authorize")
+    async def oauth_authorize_alias(request: Request):
+        query = request.url.query
+        target = "/authorize" + (("?" + query) if query else "")
+        return RedirectResponse(url=target, status_code=307)
+
+    @app.post("/oauth/token")
+    async def oauth_token_alias(request: Request):
+        return await token_endpoint(request)
 
 
 def _request_scope_key(request: Request) -> str:
