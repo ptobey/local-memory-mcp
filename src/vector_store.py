@@ -330,6 +330,27 @@ def _sigmoid(x: float) -> float:
         return 0.0 if x < 0 else 1.0
 
 
+def _parse_audit_log(metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return a chunk's audit_log as a list of {action, author, at} entries.
+    Back-fills a single 'created' entry for chunks written before authorship
+    tracking existed, so audit views work uniformly on old and new chunks."""
+    raw = (metadata or {}).get("audit_log")
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                return data
+        except (ValueError, TypeError):
+            pass
+    return [{
+        "action": "created",
+        "author": str((metadata or {}).get("author") or "unknown"),
+        "at": str((metadata or {}).get("timestamp") or ""),
+    }]
+
+
 class VectorStore:
     def __init__(
         self,
@@ -413,8 +434,13 @@ class VectorStore:
         supersedes: Optional[str] = None,
         timestamp: Optional[str] = None,
         word_count: int = 0,
+        author: Optional[str] = None,
+        audit_log: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         created_at = timestamp or _now_iso()
+        who = (author or "unknown").strip() or "unknown"
+        if audit_log is None:
+            audit_log = [{"action": "created", "author": who, "at": created_at}]
         return {
             "timestamp": created_at,
             "last_modified": created_at,
@@ -425,6 +451,8 @@ class VectorStore:
             "word_count": int(word_count),
             "access_count": 0,
             "last_accessed": "",
+            "author": who,
+            "audit_log": json.dumps(audit_log),
         }
 
     def add_chunk(
@@ -434,6 +462,8 @@ class VectorStore:
         source_type: str = "user_statement",
         supersedes: Optional[str] = None,
         timestamp: Optional[str] = None,
+        author: Optional[str] = None,
+        audit_log: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         chunk_id = str(uuid4())
         embedding = self.embedding_manager.embed_text(text)
@@ -445,6 +475,8 @@ class VectorStore:
                 supersedes=supersedes,
                 timestamp=timestamp,
                 word_count=word_count,
+                author=author,
+                audit_log=audit_log,
             )
         )
         self.collection.add(
@@ -490,15 +522,22 @@ class VectorStore:
         chunk_id: str,
         new_text: str,
         strategy: str = "version",
+        author: Optional[str] = None,
     ) -> Optional[str]:
         existing = self.get_chunk(chunk_id)
         if not existing:
             return None
+        who = (author or "unknown").strip() or "unknown"
+        now = _now_iso()
+        prior_log = _parse_audit_log(existing.metadata)
+        edit_entry = {"action": "updated", "author": who, "at": now, "strategy": strategy}
         if strategy == "replace":
             embedding = self.embedding_manager.embed_text(new_text)
             metadata = dict(existing.metadata)
-            metadata["last_modified"] = _now_iso()
+            metadata["last_modified"] = now
             metadata["word_count"] = len(new_text.split())
+            metadata["author"] = who
+            metadata["audit_log"] = json.dumps(prior_log + [edit_entry])
             self.collection.update(
                 ids=[chunk_id],
                 documents=[new_text],
@@ -506,11 +545,14 @@ class VectorStore:
                 metadatas=[_normalize_metadata(metadata)],
             )
             return chunk_id
+        # version strategy: the new chunk carries the full history so far.
         new_id = self.add_chunk(
             text=new_text,
             confidence=float(existing.metadata.get("confidence", 1.0)),
             source_type=existing.metadata.get("source_type", "user_statement"),
             supersedes=chunk_id,
+            author=who,
+            audit_log=prior_log + [edit_entry],
         )
         self._update_chunk_metadata(chunk_id, {"deprecated": True})
         return new_id
@@ -595,6 +637,7 @@ class VectorStore:
                     "supersedes": supersedes,
                     "word_count": word_count,
                     "query_overlap": lexical_overlap,
+                    "author": str(metadata.get("author", "") or ""),
                 }
             )
         # --- Stage 2: cross-encoder rerank (rerank score ALONE decides order) ---
@@ -790,6 +833,28 @@ class VectorStore:
                 break
             current = by_id.get(supersedes)
         return chain
+
+    def get_audit_history(self, chunk_id: str) -> Dict[str, Any]:
+        """Authorship + edit audit for a chunk: who created it and when, who
+        updated it and when. history[] is chronological (created, then each
+        update) across the version chain."""
+        record = self.get_chunk(chunk_id)
+        if not record:
+            return {}
+        m = record.metadata or {}
+        log = _parse_audit_log(m)
+        created = next((e for e in log if e.get("action") == "created"), None)
+        return {
+            "chunk_id": chunk_id,
+            "created_by": str((created or {}).get("author") or m.get("author") or "unknown"),
+            "created_at": str(m.get("timestamp") or ""),
+            "current_author": str(m.get("author") or "unknown"),
+            "last_modified": str(m.get("last_modified") or ""),
+            "deprecated": bool(m.get("deprecated", False)),
+            "supersedes": str(m.get("supersedes") or ""),
+            "edit_count": len(log),
+            "history": log,
+        }
 
     def create_backup(self, label: Optional[str] = None) -> Dict[str, Any]:
         backup_root = Path(__file__).resolve().parents[1] / "backups"
