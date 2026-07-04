@@ -738,11 +738,13 @@ def store(text: str) -> Dict[str, Any]:
     Aim for 150-300 words per chunk for best retrieval.
     Chunks over 500 words will be flagged during health checks.
 
-    IMPORTANT — token efficiency: Write every chunk in as few tokens as possible without
-    losing meaning. Strip filler phrases, redundant context, and verbose transitions. Use
-    abbreviations, bullet lists, and compact notation (e.g. "PHX" not "Phoenix, Arizona").
-    Prefer terse key:value or label: fact style over full sentences where meaning is
-    preserved. Every word must earn its place.
+    IMPORTANT — fidelity over brevity: Write concisely, but never sacrifice meaning to
+    save tokens. Preserve nuance, reasoning, qualifiers, caveats, specific details, and
+    any emotional or subjective framing — those are the point of a memory and must
+    survive so the chunk is still useful when recalled later. Trim only genuine filler
+    (redundant restatements, empty transitions), never substance. Use natural language;
+    lists are fine where they aid recall. Keep names, numbers, and distinctions exact —
+    don't abbreviate away precision. When unsure whether a detail matters, keep it.
     """
     _log(f"[STORE] Adding text: {text[:100]}...")
     store_instance, reconciler, _ = _ensure_ready()
@@ -1001,11 +1003,12 @@ def update(chunk_id: str, new_text: str, strategy: str = "version") -> Dict[str,
     The response always includes self-heal fields; if self_heal_required=true,
     complete remediation before finalizing the user-facing response.
 
-    IMPORTANT — token efficiency: Write new_text in as few tokens as possible without
-    losing meaning. Strip filler phrases, redundant context, and verbose transitions. Use
-    abbreviations, bullet lists, and compact notation (e.g. "PHX" not "Phoenix, Arizona").
-    Prefer terse key:value or label: fact style over full sentences where meaning is
-    preserved. Every word must earn its place.
+    IMPORTANT — fidelity over brevity: Write new_text concisely, but never sacrifice
+    meaning to save tokens. Preserve nuance, reasoning, qualifiers, caveats, specific
+    details, and any emotional or subjective framing — those are the point of a memory
+    and must survive so the chunk is still useful when recalled later. Trim only genuine
+    filler, never substance. Keep names, numbers, and distinctions exact — don't
+    abbreviate away precision. When unsure whether a detail matters, keep it.
     """
     return update_chunk(chunk_id=chunk_id, new_text=new_text, strategy=strategy)
 
