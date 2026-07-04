@@ -190,6 +190,16 @@ def _load_config() -> Dict[str, Any]:
         "RERANK_ENABLED": True,
         "RERANKER_MODEL": "cross-encoder/ms-marco-MiniLM-L-6-v2",
         "RERANK_OVERFETCH": 5,
+        # Adaptive result count: instead of a hard top_k, extend past k while
+        # the reranker score stays above RERANK_SCORE_THRESHOLD (before the
+        # relevance "cliff"), capped at min(RERANK_MAX_K, k*RERANK_EXPAND_FACTOR).
+        # If the best rerank score is below RERANK_LOWCONF_FLOOR the reranker
+        # isn't discriminating, so fall back to bi-encoder ordering.
+        "RERANK_ADAPTIVE_K": True,
+        "RERANK_SCORE_THRESHOLD": 0.5,
+        "RERANK_MAX_K": 15,
+        "RERANK_EXPAND_FACTOR": 2.0,
+        "RERANK_LOWCONF_FLOOR": 0.4,
         "RECONCILIATION_THRESHOLD": 0.85,
         "AUTO_MERGE_THRESHOLD": 0.95,
         "LLM_PROVIDER": "anthropic",
@@ -343,6 +353,23 @@ class VectorStore:
             self.rerank_overfetch = max(1, int(config.get("RERANK_OVERFETCH", 5)))
         except (TypeError, ValueError):
             self.rerank_overfetch = 5
+        self.rerank_adaptive = bool(config.get("RERANK_ADAPTIVE_K", True))
+        try:
+            self.rerank_score_threshold = float(config.get("RERANK_SCORE_THRESHOLD", 0.5))
+        except (TypeError, ValueError):
+            self.rerank_score_threshold = 0.5
+        try:
+            self.rerank_max_k = max(1, int(config.get("RERANK_MAX_K", 15)))
+        except (TypeError, ValueError):
+            self.rerank_max_k = 15
+        try:
+            self.rerank_expand_factor = max(1.0, float(config.get("RERANK_EXPAND_FACTOR", 2.0)))
+        except (TypeError, ValueError):
+            self.rerank_expand_factor = 2.0
+        try:
+            self.rerank_lowconf_floor = float(config.get("RERANK_LOWCONF_FLOOR", 0.4))
+        except (TypeError, ValueError):
+            self.rerank_lowconf_floor = 0.4
         self.client = self._build_client(self.persist_dir)
         disabled_embedding = _DisabledEmbeddingFunction()
         self.collection = self.client.get_or_create_collection(
@@ -586,17 +613,53 @@ class VectorStore:
                 for item, raw in zip(output, raw_scores):
                     rerank_score = _sigmoid(float(raw))
                     item["rerank_score"] = rerank_score
-                    # rank_score always means "the score that set final order".
-                    item["rank_score"] = rerank_score
                     item["reranked"] = True
                     item["recency_score"] = _compute_recency_score(
                         item.get("last_modified") or item.get("timestamp") or ""
                     )
-                output.sort(
-                    key=lambda item: (item["rerank_score"], item["score"]),
-                    reverse=True,
-                )
-                output = output[:top_k]
+                max_rerank = max(item["rerank_score"] for item in output)
+                if self.rerank_adaptive and max_rerank < self.rerank_lowconf_floor:
+                    # Low-confidence guard: the best (query, chunk) pair still
+                    # scores low, so the cross-encoder isn't discriminating
+                    # (common on broad "everything about X" queries). Its order
+                    # is unreliable — fall back to bi-encoder ordering.
+                    for item in output:
+                        item["rank_score"] = item["score"]
+                        item["rerank_low_confidence"] = True
+                    output.sort(
+                        key=lambda item: (
+                            item["score"],
+                            item.get("last_modified") or item.get("timestamp") or "",
+                        ),
+                        reverse=True,
+                    )
+                    output = output[:top_k]
+                else:
+                    # rank_score always means "the score that set final order".
+                    for item in output:
+                        item["rank_score"] = item["rerank_score"]
+                    output.sort(
+                        key=lambda item: (item["rerank_score"], item["score"]),
+                        reverse=True,
+                    )
+                    if self.rerank_adaptive:
+                        # Forced-higher: keep chunks past top_k while they stay
+                        # above the relevance cliff, so a tight cluster of
+                        # relevant chunks isn't cut off just for exceeding k.
+                        cap = min(
+                            self.rerank_max_k,
+                            max(top_k, int(round(top_k * self.rerank_expand_factor))),
+                        )
+                        n = min(top_k, len(output))
+                        while (
+                            n < len(output)
+                            and n < cap
+                            and output[n]["rerank_score"] >= self.rerank_score_threshold
+                        ):
+                            n += 1
+                        output = output[:n]
+                    else:
+                        output = output[:top_k]
                 if self.enable_access_tracking and output:
                     self._bump_access(output)
                 return output
