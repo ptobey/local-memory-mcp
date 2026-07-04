@@ -146,6 +146,14 @@ async def bind_request_scope_hint(request: Request, call_next):
 _sse_app = mcp.sse_app()
 _streamable_http_app = mcp.streamable_http_app()
 
+# We mount the streamable-HTTP ROUTES (below) rather than the whole sub-app, so
+# that sub-app's lifespan never runs — and that lifespan is what starts the
+# session manager's task group. Without it, POST /mcp raises
+# "Task group is not initialized". Attach the session manager's run() to this
+# app's lifespan (mirrors FastMCP.streamable_http_app's own lifespan). SSE uses
+# a separate transport and works without this.
+app.router.lifespan_context = lambda _app: mcp.session_manager.run()
+
 _applied_middlewares: set[tuple[str, str, str]] = set()
 for transport_app in (_sse_app, _streamable_http_app):
     for middleware in transport_app.user_middleware:
