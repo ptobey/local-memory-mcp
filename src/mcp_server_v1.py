@@ -725,14 +725,11 @@ def store(text: str) -> Dict[str, Any]:
     Use store() only when the information is truly new and not a correction/refinement
     of an existing chunk.
 
-    If the user message looks like an update/correction/clarification, treat that as a
-    warning sign to search first before storing.
-    store() returns warnings/candidate matches for update-like writes when strong active
-    matches already exist. The AI should review those warnings and decide how to fix them:
-    usually search first, then use update(strategy="version"), and delete stale parallel
-    summaries if needed.
-    The response always includes self-heal fields. If self_heal_required=true, the AI
-    should complete the remediation loop before finalizing the user-facing response.
+    If the input looks like an update/correction/clarification, search first — it
+    probably belongs in update(), not store().
+    If the response comes back with warnings (self_heal_required=true), resolve them
+    before finishing: review the flagged candidate chunks, then update(strategy="version")
+    the right one and soft-delete any stale parallel summaries.
 
     You decide how to chunk this information.
     Aim for 150-300 words per chunk for best retrieval.
@@ -870,11 +867,10 @@ def search(
     """
     Semantic search for existing memory.
 
-    Just pass a natural-language query and how many results you want (top_k).
-    Retrieval is two-stage under the hood and needs no tuning from you: a fast
-    bi-encoder pulls a wide candidate pool (top_k * overfetch), then a
-    cross-encoder reranker reorders that pool and returns the top_k. Ask for the
-    number of results you actually want; the wider pool is handled internally.
+    Pass a natural-language query and roughly how many results you want (top_k) —
+    you don't tune anything else. Treat top_k as a target, not a hard limit: you'll
+    get top_k, or a few more when several extra chunks are strongly relevant, so
+    nothing useful is cut off.
 
     Use this before store()/update() when handling:
     - decisions and decision hierarchy changes
@@ -882,12 +878,11 @@ def search(
     - corrections
     - status updates ("now", "as of", "no longer", "eliminated", etc.)
 
-    Search results include fields to help choose canonical/current chunks:
-    timestamp, last_modified, source_type, supersedes, deprecated, recency_score.
-    recency_score is 1.0 for today and decays to 0.0 at 365 days old. Final
-    ordering is decided by the reranker alone; recency_score is informational —
-    use it to pick the current source of truth when several chunks conflict on
-    the same topic.
+    Each result carries fields for picking the canonical/current chunk when several
+    conflict on one topic: timestamp, last_modified, source_type, supersedes,
+    deprecated, and recency_score (1.0 = today, decaying to 0.0 at 365 days). Use
+    recency_score to spot the most recent source of truth; it's informational and
+    does not change the ranking.
     """
     store_instance, _, _ = _ensure_ready()
     results = store_instance.search(
@@ -996,12 +991,10 @@ def update(chunk_id: str, new_text: str, strategy: str = "version") -> Dict[str,
     Prefer strategy="version" for evolving state so history is preserved and the old chunk
     is deprecated. Use strategy="replace" only for direct corrections to the same record.
 
-    After versioning a state chunk, search again and review any older parallel summaries
-    that may now be stale/conflicting but are not part of the same supersedes chain.
-    Both store() and update() may return a structured warnings[] list for AI handling.
-    Prefer warnings[], warning_summary, and warning_context for issue handling.
-    The response always includes self-heal fields; if self_heal_required=true,
-    complete remediation before finalizing the user-facing response.
+    After versioning a state chunk, search again for older parallel summaries outside
+    this supersedes chain that may now be stale — soft-delete the ones that are.
+    If the response comes back with warnings (self_heal_required=true), resolve them
+    before finishing.
 
     IMPORTANT — fidelity over brevity: Write new_text concisely, but never sacrifice
     meaning to save tokens. Preserve nuance, reasoning, qualifiers, caveats, specific
@@ -1033,6 +1026,7 @@ def delete(chunk_id: str, hard_delete: bool = False) -> Dict[str, Any]:
 
 @mcp.tool()
 def get_chunk(chunk_id: str) -> Dict[str, Any]:
+    """Fetch one chunk's full text and metadata by chunk_id."""
     store_instance, _, _ = _ensure_ready()
     record = store_instance.get_chunk(chunk_id)
     if not record:
@@ -1046,24 +1040,28 @@ def get_chunk(chunk_id: str) -> Dict[str, Any]:
 
 @mcp.tool()
 def get_evolution_chain(chunk_id: str) -> List[Dict[str, Any]]:
+    """A chunk's version history: this chunk plus everything it supersedes, newest first."""
     store_instance, _, _ = _ensure_ready()
     return store_instance.get_evolution_chain(chunk_id)
 
 
 @mcp.tool()
 def self_check() -> Dict[str, Any]:
+    """Health check: chunk counts, potential duplicates, unresolved conflicts, embedding integrity."""
     store_instance, _, _ = _ensure_ready()
     return store_instance.self_check()
 
 
 @mcp.tool()
 def create_backup(label: Optional[str] = None) -> Dict[str, Any]:
+    """Snapshot the full memory store to disk (optionally labeled). Use before risky bulk edits."""
     store_instance, _, _ = _ensure_ready()
     return store_instance.create_backup(label=label)
 
 
 @mcp.tool()
 def restore_backup(backup_id: str) -> Dict[str, Any]:
+    """Restore the memory store from a backup_id (overwrites current active state)."""
     store_instance, _, _ = _ensure_ready()
     return store_instance.restore_backup(backup_id=backup_id)
 
