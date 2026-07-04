@@ -63,21 +63,32 @@ Then point your MCP client at `http://localhost:8000/mcp`. Done.
 
 **Write path:** `store`/`update` writes a chunk → reconciliation checks for overlap/conflict → returns warnings and self-heal hints when a write looks risky.
 
-**Read path:** `search` runs semantic retrieval → ranking blends similarity with lightweight lexical/recency signals → deprecated chunks stay hidden unless explicitly requested.
+**Read path:** `search` is two-stage — a fast bi-encoder pulls a wide candidate pool, a cross-encoder reranker reorders it for precision, and the number of results adapts to how much is genuinely relevant. Deprecated chunks stay hidden unless explicitly requested.
+
+### Retrieval pipeline
+
+You never tune retrieval — just pass a query and a rough `top_k`:
+
+1. **Bi-encoder recall** — embed the query and pull a wide candidate pool (`top_k × RERANK_OVERFETCH`) by cosine similarity.
+2. **Cross-encoder rerank** — a local reranker (default `cross-encoder/ms-marco-MiniLM-L-6-v2`) scores every (query, chunk) pair and reorders for precision. Loaded once and kept warm; if it can't load, search degrades gracefully to bi-encoder ordering.
+3. **Adaptive result count** — `top_k` is a target, not a hard cap: results extend past it while relevance stays high (so a tight cluster of good matches isn't cut off), up to a `RERANK_MAX_K` ceiling. When the reranker can't confidently discriminate (broad queries), it falls back to bi-encoder ordering.
+
+Recency and lexical overlap are returned as fields for the agent to use, not blended into the ranking. All of it is tunable via `RERANK_*` keys in `config.json`.
 
 ---
 
 ## Features
 
-- MCP tools: `store`, `search`, `update`, `delete`, `get_chunk`, `get_evolution_chain`
+- Two-stage retrieval: bi-encoder recall → cross-encoder reranking, with an adaptive result count and graceful bi-encoder fallback
+- MCP tools: `store`, `search`, `update`, `delete`, `get_chunk`, `get_evolution_chain`, `get_recent`, `self_check`, `get_issues`, backup/restore, and conflict resolution
 - Versioned updates (`strategy="version"`) with supersedes chains
 - Soft delete by default (history retained), optional hard delete
 - Heuristic reconciliation and conflict logging
 - Warning-first write responses with structured `warnings[]` and self-heal fields
 - Health checks for oversized chunks and unresolved conflicts
 - Local backup/restore for the persisted vector DB
-- Stdio and SSE transports
-- Optional SSE auth: `none` (local-only), `bearer`, or `oauth`
+- Stdio, SSE, and streamable-HTTP (`/mcp`) transports
+- Optional auth: `none` (local-only), `bearer`, or `oauth`
 
 ---
 
