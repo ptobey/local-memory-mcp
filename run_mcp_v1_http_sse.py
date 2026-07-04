@@ -22,7 +22,7 @@ from src.mcp_server_v1 import (  # noqa: E402
 
 app = FastAPI(
     title="Local Memory MCP v1",
-    version="1.0.0",
+    version="1.1.0",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,

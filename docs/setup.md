@@ -62,10 +62,12 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-2. Prepare local embedding model (one-time):
+2. Prepare local models (one-time — embedding model + reranker):
 ```bash
 python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
 ```
+The reranker powers two-stage search. To skip it entirely, set `RERANK_ENABLED=false` in `config.json` (retrieval falls back to plain bi-encoder).
 
 3. Optional local runtime config:
 `config.example.json` is the commit-safe template.

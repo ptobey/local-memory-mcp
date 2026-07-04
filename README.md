@@ -80,15 +80,16 @@ Recency and lexical overlap are returned as fields for the agent to use, not ble
 ## Features
 
 - Two-stage retrieval: bi-encoder recall → cross-encoder reranking, with an adaptive result count and graceful bi-encoder fallback
-- MCP tools: `store`, `search`, `update`, `delete`, `get_chunk`, `get_evolution_chain`, `get_recent`, `self_check`, `get_issues`, backup/restore, and conflict resolution
+- MCP tools: `store`, `search`, `update`, `delete`, `get_chunk`, `get_evolution_chain`, `get_audit`, `get_recent`, `self_check`, `get_issues`, backup/restore, and conflict resolution
 - Versioned updates (`strategy="version"`) with supersedes chains
+- Author metadata + per-chunk audit history (who created/updated a chunk, and when)
 - Soft delete by default (history retained), optional hard delete
 - Heuristic reconciliation and conflict logging
 - Warning-first write responses with structured `warnings[]` and self-heal fields
 - Health checks for oversized chunks and unresolved conflicts
 - Local backup/restore for the persisted vector DB
 - Stdio, SSE, and streamable-HTTP (`/mcp`) transports
-- Optional auth: `none` (local-only), `bearer`, or `oauth`
+- Optional auth: `none` (local-only), `bearer`, or `oauth` (issued tokens persist across restarts)
 
 ---
 

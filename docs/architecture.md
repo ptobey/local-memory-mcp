@@ -7,6 +7,7 @@ This document describes the current v1 architecture as implemented today.
 - `src/vector_store.py`: chunk persistence, metadata, retrieval, backup/restore.
 - `src/reconciliation.py`: heuristic overlap/conflict detection and reconciliation log writes.
 - `src/health_monitor.py`: oversized chunk and unresolved conflict reporting.
+- `src/oauth_provider.py`: simple OAuth provider for the SSE/HTTP transports; issued access tokens persist to disk so restarts don't drop sessions.
 - `run_mcp_v1_stdio.py`: stdio MCP runner.
 - `run_mcp_v1_http_sse.py`: FastAPI HTTP/SSE transport wrapper for MCP.
 
@@ -19,11 +20,11 @@ This document describes the current v1 architecture as implemented today.
 1. Ingest
    `store(text)` calls `VectorStore.add_chunk(...)`.
 2. Metadata assignment
-   Base metadata is attached at write time (timestamps, confidence, source type, deprecation flags, supersedes pointer, word count).
+   Base metadata is attached at write time (timestamps, confidence, source type, deprecation flags, supersedes pointer, word count, author, and an audit-log entry).
 3. Reconciliation pass
    New writes are checked against active chunks to detect overlap/contradiction/soft duplicates.
 4. Retrieval
-   `search(...)` performs embedding similarity query and applies lightweight ranking boosts.
+   `search(...)` runs two-stage bi-encoder recall + cross-encoder rerank with an adaptive result count (see Retrieval Model).
 5. Evolution
    `update(strategy="version")` creates a new chunk, links it with `supersedes`, and deprecates the old chunk.
 6. Deprecation or deletion
@@ -43,16 +44,30 @@ Current chunk metadata fields used by retrieval and maintenance:
 - `word_count`: chunk size.
 - `access_count`: retrieval count.
 - `last_accessed`: most recent retrieval timestamp.
+- `author`: who created or last updated the chunk (agent-supplied; `unknown` if not given).
+- `audit_log`: chronological `{action, author, at}` edit trail (JSON), carried forward across the version chain and surfaced by `get_audit`.
 
 Metadata is intentionally lightweight. Most semantics stay in chunk text so LLMs can reason directly.
 
 ## Retrieval Model
-`VectorStore.search(...)` combines:
+`VectorStore.search(...)` is a two-stage pipeline, all config-tunable via `RERANK_*` keys:
 
-- Embedding similarity (`score = 1 - distance`).
-- Lexical overlap bonus (`query_overlap`).
-- Recency bonus for time-sensitive queries (based on `last_modified`/`timestamp`).
-- Update-style text bonus for state/update queries.
+1. **Bi-encoder recall.** Embed the query and pull a wide candidate pool of
+   `top_k * RERANK_OVERFETCH` chunks by cosine similarity (`score = 1 - distance`).
+2. **Cross-encoder rerank.** A local reranker (`RERANKER_MODEL`, default
+   `cross-encoder/ms-marco-MiniLM-L-6-v2`) scores every `(query, chunk)` pair and
+   reorders by relevance. Loaded once and kept warm; if it can't load, search
+   degrades gracefully to bi-encoder ordering.
+3. **Adaptive result count.** `top_k` is a target, not a hard cap: results extend
+   past it while the rerank score stays above `RERANK_SCORE_THRESHOLD` (up to a
+   `RERANK_MAX_K` ceiling), so a tight cluster of relevant chunks isn't cut off.
+   When the reranker's best score is below `RERANK_LOWCONF_FLOOR` — it can't
+   confidently discriminate, common on broad queries — it falls back to bi-encoder
+   ordering.
+
+`recency_score` and `query_overlap` are returned as informational fields for the
+assistant; they do not change the ranking. Set `RERANK_ENABLED=false` for plain
+fixed-`top_k` bi-encoder retrieval.
 
 Default behavior excludes deprecated chunks. Set `include_deprecated=True` for history-sensitive tasks.
 
