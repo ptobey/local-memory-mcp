@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+import os
 import secrets
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from mcp.server.auth.provider import (
@@ -37,10 +40,63 @@ class InMemoryOAuthProvider(
 ):
     client: OAuthClientAnyRedirect
     token_ttl_seconds: int = 3600
+    token_store_path: Optional[str] = None
 
     def __post_init__(self) -> None:
         self._auth_codes: Dict[str, AuthorizationCode] = {}
         self._access_tokens: Dict[str, AccessToken] = {}
+        # Persist issued access tokens so a server restart doesn't log everyone
+        # out (the store is otherwise purely in-memory). Auth codes stay
+        # in-memory — they're single-use and expire in ~5 min.
+        self._store_path = self.token_store_path or str(
+            Path(__file__).resolve().parents[1] / ".oauth_tokens.json"
+        )
+        self._load_tokens()
+
+    def _load_tokens(self) -> None:
+        try:
+            raw = json.loads(Path(self._store_path).read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError, OSError):
+            return
+        now = time.time()
+        for tok, data in (raw.get("access_tokens") or {}).items():
+            try:
+                expires_at = data.get("expires_at")
+                if expires_at is not None and float(expires_at) <= now:
+                    continue
+                self._access_tokens[tok] = AccessToken(**data)
+            except Exception:
+                continue
+
+    def _save_tokens(self) -> None:
+        now = time.time()
+        out: Dict[str, Any] = {}
+        for tok, at in self._access_tokens.items():
+            expires_at = getattr(at, "expires_at", None)
+            if expires_at is not None and float(expires_at) <= now:
+                continue
+            try:
+                out[tok] = at.model_dump(mode="json")
+            except Exception:
+                out[tok] = {
+                    "token": getattr(at, "token", tok),
+                    "client_id": getattr(at, "client_id", ""),
+                    "scopes": list(getattr(at, "scopes", []) or []),
+                    "expires_at": getattr(at, "expires_at", None),
+                    "resource": getattr(at, "resource", None),
+                }
+        try:
+            path = Path(self._store_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"access_tokens": out}), encoding="utf-8")
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError:
+                pass
+            tmp.replace(path)
+        except OSError:
+            pass
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         if client_id == self.client.client_id:
@@ -96,6 +152,7 @@ class InMemoryOAuthProvider(
             expires_at=expires_at,
             resource=authorization_code.resource,
         )
+        self._save_tokens()
         scope_str = " ".join(token_scopes) if token_scopes else None
         return OAuthToken(
             access_token=access_token,
@@ -116,3 +173,4 @@ class InMemoryOAuthProvider(
     async def revoke_token(self, token):
         if isinstance(token, AccessToken):
             self._access_tokens.pop(token.token, None)
+            self._save_tokens()

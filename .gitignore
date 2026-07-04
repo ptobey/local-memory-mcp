@@ -33,3 +33,7 @@ config.local.json
 # Local tool/editor state
 .claude/
 .vscode/
+
+# persisted OAuth access tokens (secrets)
+.oauth_tokens.json
+.oauth_tokens.tmp
