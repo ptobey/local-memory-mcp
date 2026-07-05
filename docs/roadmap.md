@@ -4,7 +4,7 @@ This roadmap is intentionally realistic and focused on reliability.
 
 ## Shipped in v1.1
 - Two-stage retrieval: bi-encoder recall + cross-encoder reranking, with an adaptive result count and low-confidence bi-encoder fallback (`RERANK_*` config).
-- Author metadata and per-chunk audit history (`get_audit`).
+- Literal-only write discipline + `source_type` provenance (`user_statement` vs `ai_inference`).
 - Persistent OAuth access tokens (survive server restarts).
 - Streamable-HTTP (`/mcp`) transport fix.
 

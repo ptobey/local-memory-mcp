@@ -712,7 +712,7 @@ def _ensure_ready():
 
 
 @mcp.tool()
-def store(text: str, author: Optional[str] = None, source_type: str = "user_statement") -> Dict[str, Any]:
+def store(text: str, source_type: str = "user_statement") -> Dict[str, Any]:
     """
     Store net-new information in memory.
 
@@ -743,9 +743,6 @@ def store(text: str, author: Optional[str] = None, source_type: str = "user_stat
     You decide how to chunk this information.
     Aim for 150-300 words per chunk for best retrieval.
     Chunks over 500 words will be flagged during health checks.
-
-    Pass author to record who is making this write (e.g. "Patrick" or "Khaleel").
-    It is stored on the chunk and shown by get_audit(); omit it if genuinely unknown.
 
     IMPORTANT — fidelity over brevity: Write concisely, but never sacrifice meaning to
     save tokens. Preserve nuance, reasoning, qualifiers, caveats, specific details, and
@@ -799,7 +796,7 @@ def store(text: str, author: Optional[str] = None, source_type: str = "user_stat
         "update(strategy='version') -> delete stale conflicting chunks -> search verify."
     )
 
-    chunk_id = store_instance.add_chunk(text=text, confidence=1.0, source_type=source_type, author=author)
+    chunk_id = store_instance.add_chunk(text=text, confidence=1.0, source_type=source_type)
     reconciler.queue_for_reconciliation(chunk_id)
     result: Dict[str, Any] = {"chunk_id": chunk_id, "word_count": len(text.split()), "stored": True}
     if looks_like_update:
@@ -932,7 +929,6 @@ def update_chunk(
     chunk_id: str,
     new_text: str,
     strategy: str = "version",
-    author: Optional[str] = None,
 ) -> Dict[str, Any]:
     store_instance, reconciler, _ = _ensure_ready()
     existing = store_instance.get_chunk(chunk_id)
@@ -944,7 +940,7 @@ def update_chunk(
             duplicate_risk = _assess_reaffirmation_duplicate_risk(existing.text, new_text)
         except Exception:
             duplicate_risk = None
-    updated_id = store_instance.update_chunk(chunk_id=chunk_id, new_text=new_text, strategy=strategy, author=author)
+    updated_id = store_instance.update_chunk(chunk_id=chunk_id, new_text=new_text, strategy=strategy)
     if not updated_id:
         return {"chunk_id": None, "error": "Chunk not found"}
     reconciler.queue_for_reconciliation(updated_id)
@@ -1006,16 +1002,13 @@ def update_chunk(
 
 
 @mcp.tool()
-def update(chunk_id: str, new_text: str, strategy: str = "version", author: Optional[str] = None) -> Dict[str, Any]:
+def update(chunk_id: str, new_text: str, strategy: str = "version") -> Dict[str, Any]:
     """
     Update existing memory.
 
     Same literal-only rule as store(): record only what the user actually stated;
     never dramatize or upgrade their reaction, and label your own inferences
     ("Claude inference:") rather than phrasing them as the user's.
-
-    Pass author to record who is making this edit (e.g. "Patrick"); it's added to
-    the chunk's audit trail (see get_audit()).
 
     Prefer strategy="version" for evolving state so history is preserved and the old chunk
     is deprecated. Use strategy="replace" only for direct corrections to the same record.
@@ -1032,7 +1025,7 @@ def update(chunk_id: str, new_text: str, strategy: str = "version", author: Opti
     filler, never substance. Keep names, numbers, and distinctions exact — don't
     abbreviate away precision. When unsure whether a detail matters, keep it.
     """
-    return update_chunk(chunk_id=chunk_id, new_text=new_text, strategy=strategy, author=author)
+    return update_chunk(chunk_id=chunk_id, new_text=new_text, strategy=strategy)
 
 
 def delete_chunk(chunk_id: str, hard_delete: bool = False) -> Dict[str, Any]:
@@ -1072,18 +1065,6 @@ def get_evolution_chain(chunk_id: str) -> List[Dict[str, Any]]:
     """A chunk's version history: this chunk plus everything it supersedes, newest first."""
     store_instance, _, _ = _ensure_ready()
     return store_instance.get_evolution_chain(chunk_id)
-
-
-@mcp.tool()
-def get_audit(chunk_id: str) -> Dict[str, Any]:
-    """Audit trail for a chunk: who created it and when, and who updated it and when.
-
-    Returns created_by / created_at, current_author, last_modified, edit_count, and a
-    chronological history[] of {action, author, at} entries spanning the version chain.
-    Chunks written before authorship tracking show author "unknown".
-    """
-    store_instance, _, _ = _ensure_ready()
-    return store_instance.get_audit_history(chunk_id)
 
 
 @mcp.tool()

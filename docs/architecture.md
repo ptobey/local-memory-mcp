@@ -20,7 +20,7 @@ This document describes the current v1 architecture as implemented today.
 1. Ingest
    `store(text)` calls `VectorStore.add_chunk(...)`.
 2. Metadata assignment
-   Base metadata is attached at write time (timestamps, confidence, source type, deprecation flags, supersedes pointer, word count, author, and an audit-log entry).
+   Base metadata is attached at write time (timestamps, confidence, source type, deprecation flags, supersedes pointer, word count).
 3. Reconciliation pass
    New writes are checked against active chunks to detect overlap/contradiction/soft duplicates.
 4. Retrieval
@@ -44,8 +44,6 @@ Current chunk metadata fields used by retrieval and maintenance:
 - `word_count`: chunk size.
 - `access_count`: retrieval count.
 - `last_accessed`: most recent retrieval timestamp.
-- `author`: who created or last updated the chunk (agent-supplied; `unknown` if not given).
-- `audit_log`: chronological `{action, author, at}` edit trail (JSON), carried forward across the version chain and surfaced by `get_audit`.
 
 Metadata is intentionally lightweight. Most semantics stay in chunk text so LLMs can reason directly.
 
