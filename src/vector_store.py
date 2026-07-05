@@ -158,6 +158,21 @@ def _is_update_style_text(text: str) -> bool:
     return any(marker in lowered for marker in markers)
 
 
+def _sanitize_backup_label(label: Optional[str]) -> str:
+    """Whitelist backup-label characters so the label can never be used to
+    traverse or escape the backups directory. Keeps alnum, dash, underscore
+    and dot; collapses everything else (including path separators) to '-'."""
+    if not label:
+        return ""
+    cleaned = "".join(
+        char if (char.isalnum() or char in "-_.") else "-"
+        for char in str(label)
+    )
+    # Strip leading dots/dashes so a label can't become "..", ".", or hidden.
+    cleaned = cleaned.strip(".-")
+    return cleaned[:80]
+
+
 def _looks_like_actionable_soft_duplicate(text_a: str, text_b: str) -> bool:
     tokens_a = set(_tokenize_for_ranking(text_a))
     tokens_b = set(_tokenize_for_ranking(text_b))
@@ -370,19 +385,29 @@ class VectorStore:
             self.rerank_lowconf_floor = float(config.get("RERANK_LOWCONF_FLOOR", 0.4))
         except (TypeError, ValueError):
             self.rerank_lowconf_floor = 0.4
+        self._collection_name = collection_name
+        self._log_collection_name = log_collection_name
+        self._open_collections()
+        self.embedding_manager = embedding_manager or EmbeddingManager()
+
+    def _open_collections(self) -> None:
+        """(Re)build the Chroma client and collection handles from persist_dir.
+
+        Called at init and after restore_backup so a live process picks up a
+        freshly swapped persist directory instead of holding a stale handle to
+        a deleted one."""
         self.client = self._build_client(self.persist_dir)
         disabled_embedding = _DisabledEmbeddingFunction()
         self.collection = self.client.get_or_create_collection(
-            name=collection_name,
+            name=self._collection_name,
             metadata={"hnsw:space": "cosine"},
             embedding_function=disabled_embedding,
         )
         self.log_collection = self.client.get_or_create_collection(
-            name=log_collection_name,
+            name=self._log_collection_name,
             metadata={"hnsw:space": "cosine"},
             embedding_function=disabled_embedding,
         )
-        self.embedding_manager = embedding_manager or EmbeddingManager()
 
     def _build_client(self, persist_dir: str):
         if not hasattr(chromadb, "PersistentClient"):
@@ -521,9 +546,38 @@ class VectorStore:
             return False
         if hard_delete:
             self.collection.delete(ids=[chunk_id])
+            # Hard delete removes the chunk entirely, so any unresolved conflict
+            # referencing it can never be reviewed against a live chunk again.
+            # Resolve those records now so they don't dangle and depress health.
+            self._resolve_conflicts_referencing(chunk_id)
         else:
             self._update_chunk_metadata(chunk_id, {"deprecated": True})
         return True
+
+    def _resolve_conflicts_referencing(self, chunk_id: str) -> int:
+        """Mark unresolved reconciliation records that reference chunk_id as
+        resolved. Returns the number of records updated."""
+        log_result = self.log_collection.get(include=["metadatas"])
+        log_ids = log_result.get("ids", [])
+        log_metas = log_result.get("metadatas", [])
+        resolved = 0
+        for log_id, meta in zip(log_ids, log_metas):
+            if not meta or bool(meta.get("auto_resolved", True)):
+                continue
+            raw = meta.get("chunk_ids_affected", "[]")
+            try:
+                affected = json.loads(raw) if isinstance(raw, str) else (raw or [])
+            except json.JSONDecodeError:
+                affected = []
+            if chunk_id not in set(affected):
+                continue
+            updated = dict(meta)
+            updated["auto_resolved"] = True
+            updated["resolved_at"] = _now_iso()
+            updated["resolved_by"] = "hard_delete_gc"
+            self.log_collection.update(ids=[log_id], metadatas=[_normalize_metadata(updated)])
+            resolved += 1
+        return resolved
 
     def search(
         self,
@@ -795,8 +849,13 @@ class VectorStore:
         backup_root = Path(__file__).resolve().parents[1] / "backups"
         backup_root.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-        backup_id = f"{timestamp}_{label}" if label else timestamp
+        safe_label = _sanitize_backup_label(label)
+        backup_id = f"{timestamp}_{safe_label}" if safe_label else timestamp
         dest = backup_root / backup_id
+        # Defense in depth: the sanitized id must resolve to a direct child of
+        # backup_root. Never build a filesystem path from raw user input.
+        if dest.resolve().parent != backup_root.resolve():
+            raise ValueError(f"Invalid backup label: {label!r}")
         if hasattr(self.client, "persist"):
             self.client.persist()
         if dest.exists():
@@ -807,13 +866,37 @@ class VectorStore:
 
     def restore_backup(self, backup_id: str) -> Dict[str, Any]:
         backup_root = Path(__file__).resolve().parents[1] / "backups"
-        source = backup_root / backup_id
-        if not source.exists():
+        # Reject empty/whitespace ids: an empty id resolves to backup_root
+        # itself, which historically passed the existence check and caused the
+        # live store to be overwritten with the entire backups folder.
+        if not backup_id or not str(backup_id).strip():
+            raise ValueError("backup_id must be a non-empty backup snapshot id")
+        source = (backup_root / backup_id).resolve()
+        # Must be a real snapshot directory that lives directly under
+        # backups/ — not the backups root, and not a path-traversal escape.
+        if source.parent != backup_root.resolve():
+            raise ValueError(f"Invalid backup_id (not a backup snapshot): {backup_id!r}")
+        if not source.is_dir():
             raise FileNotFoundError(f"Backup not found: {backup_id}")
-        if Path(self.persist_dir).exists():
-            shutil.rmtree(self.persist_dir)
-        shutil.copytree(source, self.persist_dir)
-        return {"backup_id": backup_id, "restored_at": _now_iso()}
+        if not (source / "chroma.sqlite3").exists():
+            raise ValueError(
+                f"Backup {backup_id!r} is not a valid Chroma snapshot "
+                "(missing chroma.sqlite3)"
+            )
+        persist_path = Path(self.persist_dir)
+        if persist_path.exists():
+            shutil.rmtree(persist_path)
+        shutil.copytree(source, persist_path)
+        # Reopen the client so this live process reads the restored directory
+        # instead of holding a handle to the one we just deleted. Without this,
+        # every subsequent call fails with "no such table: embeddings".
+        self._open_collections()
+        restored_chunks = len(self.collection.get(include=[]).get("ids", []))
+        return {
+            "backup_id": backup_id,
+            "restored_at": _now_iso(),
+            "chunk_count": restored_chunks,
+        }
 
     def self_check(self) -> Dict[str, Any]:
         result = self.collection.get(include=["metadatas", "embeddings"])
@@ -845,12 +928,37 @@ class VectorStore:
             active_id_embeddings,
             where={"deprecated": False},
         )
-        health_score = 1.0
-        if total_chunks:
-            health_score = max(
-                0.0,
-                1.0 - min(1.0, unresolved / float(total_chunks)),
-            )
+        # Count empty and oversized ACTIVE chunks from word_count metadata.
+        oversize_flag = 500
+        empty_active_chunks = 0
+        oversized_chunks = 0
+        for metadata in metadatas:
+            meta = metadata or {}
+            if bool(meta.get("deprecated", False)):
+                continue
+            try:
+                word_count = int(meta.get("word_count", 0) or 0)
+            except (TypeError, ValueError):
+                word_count = 0
+            if word_count <= 0:
+                empty_active_chunks += 1
+            elif word_count > oversize_flag:
+                oversized_chunks += 1
+
+        # Health reflects real integrity, not just a conflict ratio. Integrity
+        # problems (missing/invalid embeddings, empty chunks, index/scan errors)
+        # tank the score; review backlog (conflicts, duplicates, oversize) applies
+        # a lighter penalty. A wiped embeddings table shows up as invalid records
+        # for every active chunk and/or a spike in scan errors, driving score -> 0.
+        denom = float(max(1, active_chunks))
+        integrity_issues = (
+            invalid_embedding_records + empty_active_chunks + duplicate_scan_errors
+        )
+        review_issues = unresolved + potential_duplicates + oversized_chunks
+        integrity_penalty = min(1.0, integrity_issues / denom)
+        review_penalty = 0.5 * min(1.0, review_issues / denom)
+        health_score = max(0.0, round(1.0 - integrity_penalty - review_penalty, 4))
+
         recommendations = []
         if potential_duplicates:
             recommendations.append(
@@ -864,9 +972,17 @@ class VectorStore:
             recommendations.append(
                 "Some active chunks had missing/invalid embeddings during self-check; run update/store maintenance as needed."
             )
+        if empty_active_chunks:
+            recommendations.append(
+                "Empty active chunks found (word_count 0); delete them — they are junk vectors."
+            )
+        if oversized_chunks:
+            recommendations.append(
+                f"{oversized_chunks} active chunk(s) exceed {oversize_flag} words; split them for better retrieval."
+            )
         if duplicate_scan_errors:
             recommendations.append(
-                "Duplicate scan skipped some records due to query/index errors; consider a backup+restore cycle if this persists."
+                "Duplicate scan skipped some records due to query/index errors; the index may be corrupt — investigate and consider restore_backup."
             )
         return {
             "total_chunks": total_chunks,
@@ -876,6 +992,8 @@ class VectorStore:
             "potential_duplicates": potential_duplicates,
             "duplicate_scan_errors": duplicate_scan_errors,
             "invalid_embedding_records": invalid_embedding_records,
+            "empty_active_chunks": empty_active_chunks,
+            "oversized_chunks": oversized_chunks,
             "health_score": health_score,
             "recommendations": recommendations,
         }
@@ -946,6 +1064,10 @@ class VectorStore:
                             "source_type": chunk.metadata.get("source_type"),
                         })
 
+                # If the record references chunks but none still exist (they were
+                # hard-deleted), it's a dangling/stale conflict — do not surface it.
+                if chunk_ids and not chunks:
+                    continue
                 # If all referenced chunks are already deprecated, this conflict is stale.
                 if chunks and all(bool(c.get("deprecated", False)) for c in chunks):
                     continue
@@ -983,6 +1105,25 @@ class VectorStore:
             "conflicts": unresolved,
             "message": f"Found {len(unresolved)} unresolved conflict(s)"
         }
+
+    def has_unresolved_conflict(self, chunk_id_a: str, chunk_id_b: str) -> bool:
+        """True if an unresolved reconciliation record references BOTH chunk ids.
+
+        Guards resolution mutations so a caller cannot deprecate two arbitrary,
+        unrelated chunks that were never flagged as duplicates/conflicts."""
+        log_result = self.log_collection.get(include=["metadatas"])
+        for meta in log_result.get("metadatas", []):
+            if not meta or bool(meta.get("auto_resolved", True)):
+                continue
+            raw = meta.get("chunk_ids_affected", "[]")
+            try:
+                affected = json.loads(raw) if isinstance(raw, str) else (raw or [])
+            except json.JSONDecodeError:
+                affected = []
+            affected = set(affected)
+            if chunk_id_a in affected and chunk_id_b in affected:
+                return True
+        return False
 
     def resolve_conflicts(self, conflict_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """Mark conflicts as resolved. If no IDs provided, resolves all unresolved conflicts."""

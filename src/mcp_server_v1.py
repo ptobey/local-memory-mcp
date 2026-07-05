@@ -711,6 +711,10 @@ def _ensure_ready():
     return _store, _reconciler, _health_monitor
 
 
+_VALID_SOURCE_TYPES = frozenset({"user_statement", "ai_inference"})
+_WORD_COUNT_FLAG = 500
+
+
 @mcp.tool()
 def store(text: str, source_type: str = "user_statement") -> Dict[str, Any]:
     """
@@ -753,6 +757,16 @@ def store(text: str, source_type: str = "user_statement") -> Dict[str, Any]:
     don't abbreviate away precision. When unsure whether a detail matters, keep it.
     """
     _log(f"[STORE] Adding text: {text[:100]}...")
+    if not text or not text.strip():
+        return {"stored": False, "error": "Cannot store empty or whitespace-only text."}
+    if source_type not in _VALID_SOURCE_TYPES:
+        return {
+            "stored": False,
+            "error": (
+                f"Invalid source_type {source_type!r}. "
+                f"Must be one of {sorted(_VALID_SOURCE_TYPES)}."
+            ),
+        }
     store_instance, reconciler, _ = _ensure_ready()
     looks_like_update = _looks_like_state_update(text)
     candidate_update_targets: List[Dict[str, Any]] = []
@@ -798,7 +812,21 @@ def store(text: str, source_type: str = "user_statement") -> Dict[str, Any]:
 
     chunk_id = store_instance.add_chunk(text=text, confidence=1.0, source_type=source_type)
     reconciler.queue_for_reconciliation(chunk_id)
-    result: Dict[str, Any] = {"chunk_id": chunk_id, "word_count": len(text.split()), "stored": True}
+    word_count = len(text.split())
+    result: Dict[str, Any] = {"chunk_id": chunk_id, "word_count": word_count, "stored": True}
+    if word_count > _WORD_COUNT_FLAG:
+        _add_warning(
+            result,
+            code="oversized_chunk",
+            severity="medium",
+            message=(
+                f"This chunk is {word_count} words (>{_WORD_COUNT_FLAG}); large chunks "
+                "dilute retrieval and pollute unrelated searches."
+            ),
+            recommended_next_action=(
+                "Split this into smaller topic-focused chunks (~150-300 words each)."
+            ),
+        )
     if looks_like_update:
         result["advisory"] = advisory_text
         result["update_like"] = True
@@ -930,6 +958,14 @@ def update_chunk(
     new_text: str,
     strategy: str = "version",
 ) -> Dict[str, Any]:
+    if not new_text or not new_text.strip():
+        return {
+            "chunk_id": None,
+            "error": (
+                "Cannot update to empty or whitespace-only text; "
+                "use delete() to remove a chunk."
+            ),
+        }
     store_instance, reconciler, _ = _ensure_ready()
     existing = store_instance.get_chunk(chunk_id)
     if not existing:
@@ -1117,37 +1153,52 @@ def resolve_soft_duplicate(
     if not new_chunk or not old_chunk:
         return {"error": "One or both chunks not found"}
 
+    # Do not mutate two arbitrary chunks. Require that reconciliation actually
+    # flagged an unresolved duplicate/conflict between this pair first; without
+    # this guard a single bad call silently deprecates a real memory.
+    if not store_instance.has_unresolved_conflict(chunk_id_new, chunk_id_old):
+        return {
+            "error": (
+                "No unresolved duplicate/conflict is registered between these "
+                "chunks; refusing to resolve. Check get_conflicts() for the "
+                "flagged pairs."
+            )
+        }
+
     result = {"resolution": resolution, "chunks_affected": [chunk_id_old, chunk_id_new]}
 
     if resolution == "merge":
-        # Merge texts and update old chunk
+        # Merge texts into a new version of the old chunk. update_chunk(version)
+        # deprecates chunk_id_old and returns the NEW surviving chunk id — report
+        # that, not the now-deprecated chunk_id_old.
         from .reconciliation import _merge_texts
         merged_text = _merge_texts(new_chunk.text, old_chunk.text)
-        store_instance.update_chunk(chunk_id_old, merged_text, strategy="version")
+        survivor_id = store_instance.update_chunk(chunk_id_old, merged_text, strategy="version")
         store_instance.update_metadata(chunk_id_new, {"deprecated": True})
         store_instance.log_reconciliation(
             "merged",
-            [chunk_id_old, chunk_id_new],
+            [chunk_id_old, chunk_id_new, survivor_id],
             "Merged by AI decision via resolve_soft_duplicate",
             auto_resolved=True,
             confidence=0.9,
         )
         result["action"] = "merged"
-        result["kept_chunk"] = chunk_id_old
+        result["kept_chunk"] = survivor_id
 
     elif resolution == "refine":
-        # New text replaces old (with versioning)
-        store_instance.update_chunk(chunk_id_old, new_chunk.text, strategy="version")
+        # New text replaces old (with versioning). The survivor is the new
+        # version returned by update_chunk, not chunk_id_old.
+        survivor_id = store_instance.update_chunk(chunk_id_old, new_chunk.text, strategy="version")
         store_instance.update_metadata(chunk_id_new, {"deprecated": True})
         store_instance.log_reconciliation(
             "refined",
-            [chunk_id_old, chunk_id_new],
+            [chunk_id_old, chunk_id_new, survivor_id],
             "Refined by AI decision via resolve_soft_duplicate",
             auto_resolved=True,
             confidence=0.9,
         )
         result["action"] = "refined"
-        result["kept_chunk"] = chunk_id_old
+        result["kept_chunk"] = survivor_id
 
     elif resolution == "keep_both":
         # Just mark the conflict as resolved, keep both active

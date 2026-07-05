@@ -268,30 +268,31 @@ class ReconciliationEngine:
         old_metadata: Dict[str, Any],
         old_text: str,
     ) -> Dict[str, Any]:
-        merged_text = _merge_texts(new_record.text, old_text)
-        merged_confidence = max(
-            float(new_record.metadata.get("confidence", 1.0)),
-            float(old_metadata.get("confidence", 1.0)),
+        # DO NOT auto-merge. High token overlap does not imply the two chunks
+        # state the same fact — e.g. "threshold is 41 microvolts" vs "threshold
+        # is 97 microvolts" overlap heavily but contradict. The previous
+        # behaviour concatenated both into a single ai_inference chunk (fusing
+        # contradictory facts into one self-contradictory "canonical" record),
+        # relabeled user statements as ai_inference, and orphaned lineage.
+        # Instead, surface the pair as an unresolved conflict for AI/user review
+        # and leave BOTH originals active and untouched. Explicit merging remains
+        # available via the resolve_soft_duplicate tool.
+        reasoning = (
+            "High-overlap chunks detected; flagged for review "
+            "(not auto-merged — may be contradictory)."
         )
-        merged_id = self.store.add_chunk(
-            merged_text,
-            confidence=merged_confidence,
-            source_type="ai_inference",
-        )
-        self.store.update_metadata(old_id, {"deprecated": True})
-        self.store.update_metadata(new_record.chunk_id, {"deprecated": True})
         self.store.log_reconciliation(
-            "merged",
-            [old_id, new_record.chunk_id, merged_id],
-            "Merged overlapping chunks into a single record.",
-            auto_resolved=True,
-            confidence=0.9,
+            "conflict",
+            [old_id, new_record.chunk_id],
+            reasoning,
+            auto_resolved=False,
+            confidence=0.8,
         )
         return {
-            "action_type": "merged",
-            "chunk_ids_affected": [old_id, new_record.chunk_id, merged_id],
-            "reasoning": "Merged overlapping chunks into a single record.",
-            "auto_resolved": True,
+            "action_type": "conflict",
+            "chunk_ids_affected": [old_id, new_record.chunk_id],
+            "reasoning": reasoning,
+            "auto_resolved": False,
         }
 
 
