@@ -712,9 +712,18 @@ def _ensure_ready():
 
 
 @mcp.tool()
-def store(text: str, author: Optional[str] = None) -> Dict[str, Any]:
+def store(text: str, author: Optional[str] = None, source_type: str = "user_statement") -> Dict[str, Any]:
     """
     Store net-new information in memory.
+
+    RECORD ONLY WHAT THE USER ACTUALLY STATED. Do not import, infer, upgrade, or
+    dramatize emotional valence. If the user's reaction is neutral, mixed, or
+    unstated, store it that way or omit it — never round it up to a positive or fit
+    it to an existing thesis. Match the intensity of their actual words: if they
+    said "meh", write "meh", not "on-brand" or "a highlight". Any synthesis or
+    interpretation that is yours rather than the user's must be prefixed
+    "Claude inference:" AND stored with source_type="ai_inference" — never phrased
+    as the user's own reaction. Default source_type is "user_statement".
 
     Recommended workflow for decision/state/preference updates:
     1) search() first (2-4 targeted queries)
@@ -790,7 +799,7 @@ def store(text: str, author: Optional[str] = None) -> Dict[str, Any]:
         "update(strategy='version') -> delete stale conflicting chunks -> search verify."
     )
 
-    chunk_id = store_instance.add_chunk(text=text, confidence=1.0, source_type="user_statement", author=author)
+    chunk_id = store_instance.add_chunk(text=text, confidence=1.0, source_type=source_type, author=author)
     reconciler.queue_for_reconciliation(chunk_id)
     result: Dict[str, Any] = {"chunk_id": chunk_id, "word_count": len(text.split()), "stored": True}
     if looks_like_update:
@@ -863,7 +872,7 @@ def store(text: str, author: Optional[str] = None) -> Dict[str, Any]:
 @mcp.tool()
 def search(
     query: str,
-    top_k: int = 5,
+    top_k: int = 10,
     min_confidence: float = 0.0,
     include_deprecated: bool = False,
 ) -> List[Dict[str, Any]]:
@@ -874,6 +883,15 @@ def search(
     you don't tune anything else. Treat top_k as a target, not a hard limit: you'll
     get top_k, or a few more when several extra chunks are strongly relevant, so
     nothing useful is cut off.
+
+    This store is dense — important topics have many chunks. Don't rely on a single
+    search: for any non-trivial retrieval (decisions, status, multi-part topics),
+    fan out across 2-4 queries covering different facets (the topic's identity, its
+    decision/outcome, its current status), and prefer a higher top_k (10-15). A
+    generic identity query ("move 5 wow trip") tends to surface identity/planning
+    chunks and bury the decision/outcome ones — so query those facets explicitly.
+    If a top result's date predates events you know happened, search again for the
+    newer chunk before answering.
 
     Use this before store()/update() when handling:
     - decisions and decision hierarchy changes
@@ -991,6 +1009,10 @@ def update_chunk(
 def update(chunk_id: str, new_text: str, strategy: str = "version", author: Optional[str] = None) -> Dict[str, Any]:
     """
     Update existing memory.
+
+    Same literal-only rule as store(): record only what the user actually stated;
+    never dramatize or upgrade their reaction, and label your own inferences
+    ("Claude inference:") rather than phrasing them as the user's.
 
     Pass author to record who is making this edit (e.g. "Patrick"); it's added to
     the chunk's audit trail (see get_audit()).
