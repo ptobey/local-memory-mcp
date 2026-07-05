@@ -1066,8 +1066,24 @@ def update(chunk_id: str, new_text: str, strategy: str = "version") -> Dict[str,
 
 def delete_chunk(chunk_id: str, hard_delete: bool = False) -> Dict[str, Any]:
     store_instance, _, _ = _ensure_ready()
+    # Distinguish "no such chunk" from "existed and was deleted" so a caller
+    # can't read a not-found as a successful/failed delete.
+    existing = store_instance.get_chunk(chunk_id)
+    if not existing:
+        return {
+            "chunk_id": chunk_id,
+            "deleted": False,
+            "found": False,
+            "hard_delete": hard_delete,
+            "message": "No such chunk; nothing to delete.",
+        }
     result = store_instance.delete_chunk(chunk_id, hard_delete=hard_delete)
-    return {"chunk_id": chunk_id, "deleted": result, "hard_delete": hard_delete}
+    return {
+        "chunk_id": chunk_id,
+        "deleted": bool(result),
+        "found": True,
+        "hard_delete": hard_delete,
+    }
 
 
 @mcp.tool()
@@ -1088,9 +1104,10 @@ def get_chunk(chunk_id: str) -> Dict[str, Any]:
     store_instance, _, _ = _ensure_ready()
     record = store_instance.get_chunk(chunk_id)
     if not record:
-        return {}
+        return {"chunk_id": chunk_id, "found": False}
     return {
         "chunk_id": record.chunk_id,
+        "found": True,
         "text": record.text,
         "metadata": record.metadata,
     }
@@ -1252,18 +1269,33 @@ def get_conflicts() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def resolve_conflicts(conflict_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+def resolve_conflicts(
+    conflict_ids: Optional[List[str]] = None,
+    resolve_all: bool = False,
+) -> Dict[str, Any]:
     """
     Mark conflicts as resolved.
-    If no IDs provided, resolves all unresolved conflicts.
+
+    Pass conflict_ids to resolve specific conflicts. To resolve EVERY unresolved
+    conflict at once you must also pass resolve_all=True — this is a deliberate
+    guard so a no-argument call can't silently wipe the entire review queue.
 
     Args:
-        conflict_ids: Optional list of conflict IDs to resolve. If None, resolves all.
+        conflict_ids: List of conflict IDs to resolve.
+        resolve_all: Set True (with no conflict_ids) to resolve all unresolved conflicts.
 
     Returns:
         Dict with count of resolved conflicts
     """
     store_instance, _, _ = _ensure_ready()
+    if conflict_ids is None and not resolve_all:
+        return {
+            "resolved_count": 0,
+            "error": (
+                "Refusing to resolve ALL conflicts implicitly. Pass conflict_ids=[...] "
+                "for specific ones, or resolve_all=True to confirm resolving everything."
+            ),
+        }
     return store_instance.resolve_conflicts(conflict_ids=conflict_ids)
 
 

@@ -158,6 +158,11 @@ def _is_update_style_text(text: str) -> bool:
     return any(marker in lowered for marker in markers)
 
 
+# Upper bounds so a single call can't dump the entire store.
+_SEARCH_MAX_K = 100
+_GET_RECENT_MAX = 100
+
+
 def _sanitize_backup_label(label: Optional[str]) -> str:
     """Whitelist backup-label characters so the label can never be used to
     traverse or escape the backups directory. Keeps alnum, dash, underscore
@@ -596,6 +601,19 @@ class VectorStore:
         # bi-encoder score semantics their thresholds depend on.
         do_rerank = self.rerank_enabled if use_reranker is None else bool(use_reranker)
 
+        if query is None or not str(query).strip():
+            raise ValueError("query must be a non-empty string")
+        try:
+            top_k = int(top_k)
+        except (TypeError, ValueError):
+            raise ValueError("top_k must be an integer")
+        if top_k <= 0:
+            raise ValueError("top_k must be a positive integer")
+        # Cap top_k here, BEFORE it is multiplied by the overfetch factor, so a
+        # huge value can't dump the whole store and a negative one can't reach
+        # Chroma as a mangled "requested results -N" error.
+        top_k = min(top_k, _SEARCH_MAX_K)
+
         embedding = self.embedding_manager.embed_text(query)
         query_tokens = set(_tokenize_for_ranking(query))
         time_sensitive = _is_time_sensitive_query(query)
@@ -786,6 +804,13 @@ class VectorStore:
         n: int = 10,
         include_deprecated: bool = False,
     ) -> Dict[str, Any]:
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            return {"error": "n must be an integer", "chunks": []}
+        if n <= 0:
+            return {"error": "n must be a positive integer", "chunks": []}
+        n = min(n, _GET_RECENT_MAX)
         result = self.collection.get(include=["documents", "metadatas"])
         ids = result.get("ids") or []
         documents = result.get("documents") or []
@@ -815,11 +840,14 @@ class VectorStore:
             key=lambda x: x.get("last_modified") or x.get("timestamp") or "",
             reverse=True,
         )
+        active_count = sum(1 for c in chunks if not c.get("deprecated", False))
+        returned = chunks[:n]
         return {
             "as_of": _now_iso(),
-            "total_returned": min(n, len(chunks)),
-            "total_active": len(chunks),
-            "chunks": chunks[:n],
+            "total_returned": len(returned),
+            "active_chunks": active_count,
+            "total_matching": len(chunks),
+            "chunks": returned,
         }
 
     def get_evolution_chain(self, chunk_id: str) -> List[Dict[str, Any]]:
@@ -1139,7 +1167,18 @@ class VectorStore:
                 if meta and not bool(meta.get("auto_resolved", True))
             ]
         else:
-            to_resolve = [cid for cid in conflict_ids if cid in log_ids]
+            known = set(log_ids)
+            unknown_ids = [cid for cid in conflict_ids if cid not in known]
+            to_resolve = [cid for cid in conflict_ids if cid in known]
+            if unknown_ids and not to_resolve:
+                return {
+                    "resolved_count": 0,
+                    "unknown_conflict_ids": unknown_ids,
+                    "message": (
+                        "None of the provided conflict_ids matched a known "
+                        "conflict record."
+                    ),
+                }
 
         if not to_resolve:
             return {"resolved_count": 0, "message": "No conflicts to resolve"}
