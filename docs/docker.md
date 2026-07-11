@@ -15,7 +15,7 @@ docker build -t local-memory-mcp:latest .
 
 ## Run (HTTP/SSE)
 ```bash
-docker run --rm -p 8000:8000 \
+docker run --rm -p 127.0.0.1:8000:8000 \
   -v local_memory_chroma_db:/app/chroma_db \
   -v local_memory_backups:/app/backups \
   local-memory-mcp:latest
@@ -32,6 +32,11 @@ Endpoints:
 docker compose up --build -d
 ```
 
+The bundled Compose file publishes only to `127.0.0.1`, so the default
+unauthenticated setup is reachable from the same machine only. Do not change
+that mapping to `0.0.0.0:8000:8000` unless you also configure bearer or OAuth
+authentication and place the service behind appropriate network controls.
+
 Stop:
 ```bash
 docker compose down
@@ -42,7 +47,7 @@ The container uses built-in defaults unless you mount a config file.
 
 Example:
 ```bash
-docker run --rm -p 8000:8000 \
+docker run --rm -p 127.0.0.1:8000:8000 \
   -v ${PWD}/config.json:/app/config.json:ro \
   -v local_memory_chroma_db:/app/chroma_db \
   -v local_memory_backups:/app/backups \

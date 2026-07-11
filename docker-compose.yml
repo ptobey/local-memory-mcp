@@ -6,7 +6,10 @@ services:
     image: local-memory-mcp:latest
     container_name: local-memory-mcp
     ports:
-      - "8000:8000"
+      # Keep an unauthenticated default install private to this machine.
+      # Use an authenticated reverse proxy or a dedicated override file before
+      # deliberately exposing the service beyond loopback.
+      - "127.0.0.1:8000:8000"
     environment:
       MCP_BIND_HOST: 0.0.0.0
       MCP_BIND_PORT: 8000
@@ -14,6 +17,16 @@ services:
       - local_memory_chroma_db:/app/chroma_db
       - local_memory_backups:/app/backups
     restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
 
 volumes:
   local_memory_chroma_db:

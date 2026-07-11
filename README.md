@@ -39,6 +39,10 @@ docker compose up --build -d
 
 Then point your MCP client at `http://localhost:8000/mcp`. Done.
 
+The Docker default is intentionally private: it publishes only to
+`127.0.0.1`. Before exposing it outside your machine, configure bearer or OAuth
+authentication and put it behind your normal network controls.
+
 → [Claude Desktop setup](docs/integrations.md) · [ChatGPT setup](docs/integrations.md) · [Manual Python install](docs/setup.md)
 
 ---
@@ -144,6 +148,7 @@ input: { "query": "current deep work schedule", "top_k": 5 }
 - [Docker guide](docs/docker.md)
 - [Limitations](docs/limitations.md)
 - [Roadmap](docs/roadmap.md)
+- [Changelog](CHANGELOG.md)
 
 ---
 

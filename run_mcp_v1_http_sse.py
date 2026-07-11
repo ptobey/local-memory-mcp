@@ -218,7 +218,11 @@ def run_server() -> None:
         bind_port = 8000
 
     if bind_host not in {"127.0.0.1", "localhost", "::1"} and _auth_mode == "none":
-        print("WARNING: Non-loopback bind with MCP_AUTH_MODE='none' is not recommended.")
+        raise RuntimeError(
+            "Refusing to bind an unauthenticated MCP server to a non-loopback host. "
+            "Keep MCP_BIND_HOST on 127.0.0.1/localhost, or configure bearer or OAuth auth "
+            "before exposing the service."
+        )
 
     print("=" * 60)
     print("Local Memory MCP v1 - MCP HTTP/SSE Server")
