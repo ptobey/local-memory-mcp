@@ -8,8 +8,9 @@ from src.mcp_server_v1 import (
     _assess_reaffirmation_duplicate_risk,
     _finalize_warning_payload,
     _looks_like_state_update,
+    store as store_memory,
 )
-from src.vector_store import VectorStore, _sanitize_backup_label
+from src.vector_store import VectorStore, _sanitize_backup_label, validate_topic
 
 
 class _FixedEmbeddingManager:
@@ -20,6 +21,25 @@ class _FixedEmbeddingManager:
 
 
 class RegressionTests(unittest.TestCase):
+    def test_topic_identifier_validation_is_strict_and_optional(self) -> None:
+        self.assertIsNone(validate_topic(None))
+        self.assertEqual(validate_topic("project.alpha-2"), "project.alpha-2")
+        for invalid in ("", " leading", "trailing ", "two words", "-leading", "trailing-", "a/b"):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    validate_topic(invalid)
+        with self.assertRaises(ValueError):
+            validate_topic("a" * 65)
+        with self.assertRaises(ValueError):
+            validate_topic(123)  # type: ignore[arg-type]
+
+    def test_store_rejects_invalid_topic_before_writing(self) -> None:
+        with patch("src.mcp_server_v1._ensure_ready") as ensure_ready:
+            result = store_memory("A valid memory", topic="not a topic")
+        self.assertFalse(result["stored"])
+        self.assertIn("topic must be", result["error"])
+        ensure_ready.assert_not_called()
+
     def test_backup_labels_cannot_escape_backup_root(self) -> None:
         self.assertEqual(_sanitize_backup_label("../../secrets"), "secrets")
         self.assertEqual(_sanitize_backup_label("..."), "")
@@ -76,6 +96,42 @@ class RegressionTests(unittest.TestCase):
                 [item["chunk_id"] for item in store.get_evolution_chain(current_id)],
                 [current_id, original_id],
             )
+
+    def test_topic_metadata_filters_search_without_changing_unscoped_search(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = VectorStore(
+                persist_dir=str(Path(temp_dir) / "chroma"),
+                embedding_manager=_FixedEmbeddingManager(),
+            )
+            alpha_id = store.add_chunk("Shared milestone", topic="alpha")
+            beta_id = store.add_chunk("Shared milestone", topic="beta")
+            unscoped_id = store.add_chunk("Shared milestone")
+
+            scoped = store.search("milestone", top_k=10, use_reranker=False, topic="alpha")
+            self.assertEqual([item["chunk_id"] for item in scoped], [alpha_id])
+            self.assertEqual(scoped[0]["topic"], "alpha")
+
+            unscoped = store.search("milestone", top_k=10, use_reranker=False)
+            self.assertEqual(
+                {item["chunk_id"] for item in unscoped},
+                {alpha_id, beta_id, unscoped_id},
+            )
+            legacy = next(item for item in unscoped if item["chunk_id"] == unscoped_id)
+            self.assertIsNone(legacy["topic"])
+
+    def test_version_update_inherits_topic_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = VectorStore(
+                persist_dir=str(Path(temp_dir) / "chroma"),
+                embedding_manager=_FixedEmbeddingManager(),
+            )
+            original_id = store.add_chunk("Alpha plan", topic="project-alpha")
+            current_id = store.update_chunk(original_id, "Updated alpha plan", strategy="version")
+
+            self.assertIsNotNone(current_id)
+            current = store.get_chunk(current_id or "")
+            self.assertIsNotNone(current)
+            self.assertEqual(current.metadata["topic"], "project-alpha")
 
 
 if __name__ == "__main__":

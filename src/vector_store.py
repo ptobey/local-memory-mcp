@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import re
 import shutil
 import sys
 from dataclasses import dataclass
@@ -161,6 +162,24 @@ def _is_update_style_text(text: str) -> bool:
 # Upper bounds so a single call can't dump the entire store.
 _SEARCH_MAX_K = 100
 _GET_RECENT_MAX = 100
+
+# Topic IDs are metadata keys, not free-form labels. Keeping the format small
+# and portable makes exact-match filters predictable across Chroma versions.
+_TOPIC_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$")
+
+
+def validate_topic(topic: Optional[str]) -> Optional[str]:
+    """Validate and return an optional topic/project identifier unchanged."""
+    if topic is None:
+        return None
+    if not isinstance(topic, str):
+        raise ValueError("topic must be a string or null")
+    if not _TOPIC_PATTERN.fullmatch(topic):
+        raise ValueError(
+            "topic must be 1-64 characters, start and end with a letter or digit, "
+            "and contain only letters, digits, '.', '_', or '-'"
+        )
+    return topic
 
 
 def _sanitize_backup_label(label: Optional[str]) -> str:
@@ -443,9 +462,10 @@ class VectorStore:
         supersedes: Optional[str] = None,
         timestamp: Optional[str] = None,
         word_count: int = 0,
+        topic: Optional[str] = None,
     ) -> Dict[str, Any]:
         created_at = timestamp or _now_iso()
-        return {
+        metadata = {
             "timestamp": created_at,
             "last_modified": created_at,
             "confidence": float(confidence),
@@ -456,6 +476,9 @@ class VectorStore:
             "access_count": 0,
             "last_accessed": "",
         }
+        if topic is not None:
+            metadata["topic"] = topic
+        return metadata
 
     def add_chunk(
         self,
@@ -464,7 +487,9 @@ class VectorStore:
         source_type: str = "user_statement",
         supersedes: Optional[str] = None,
         timestamp: Optional[str] = None,
+        topic: Optional[str] = None,
     ) -> str:
+        topic = validate_topic(topic)
         chunk_id = str(uuid4())
         embedding = self.embedding_manager.embed_text(text)
         word_count = len(text.split())
@@ -475,6 +500,7 @@ class VectorStore:
                 supersedes=supersedes,
                 timestamp=timestamp,
                 word_count=word_count,
+                topic=topic,
             )
         )
         self.collection.add(
@@ -541,6 +567,7 @@ class VectorStore:
             confidence=float(existing.metadata.get("confidence", 1.0)),
             source_type=existing.metadata.get("source_type", "user_statement"),
             supersedes=chunk_id,
+            topic=existing.metadata.get("topic") or None,
         )
         self._update_chunk_metadata(chunk_id, {"deprecated": True})
         return new_id
@@ -591,6 +618,7 @@ class VectorStore:
         min_confidence: float = 0.0,
         include_deprecated: bool = False,
         use_reranker: Optional[bool] = None,
+        topic: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         # Two-stage retrieval:
         #   stage 1 (bi-encoder) — overfetch a WIDE pool of top_k * overfetch
@@ -600,6 +628,7 @@ class VectorStore:
         # (duplicate detection) pass use_reranker=False to keep the original
         # bi-encoder score semantics their thresholds depend on.
         do_rerank = self.rerank_enabled if use_reranker is None else bool(use_reranker)
+        topic = validate_topic(topic)
 
         if query is None or not str(query).strip():
             raise ValueError("query must be a non-empty string")
@@ -617,9 +646,16 @@ class VectorStore:
         embedding = self.embedding_manager.embed_text(query)
         query_tokens = set(_tokenize_for_ranking(query))
         time_sensitive = _is_time_sensitive_query(query)
-        where: Dict[str, Any] = {}
+        filters: List[Dict[str, Any]] = []
         if not include_deprecated:
-            where["deprecated"] = False
+            filters.append({"deprecated": False})
+        if topic is not None:
+            filters.append({"topic": topic})
+        where: Optional[Dict[str, Any]] = None
+        if len(filters) == 1:
+            where = filters[0]
+        elif filters:
+            where = {"$and": filters}
         total = self._collection_count()
         if total == 0:
             return []
@@ -643,6 +679,7 @@ class VectorStore:
             last_modified = str(metadata.get("last_modified", "") or "")
             source_type = str(metadata.get("source_type", "") or "")
             supersedes = str(metadata.get("supersedes", "") or "")
+            result_topic = metadata.get("topic")
             try:
                 word_count = int(metadata.get("word_count", 0) or 0)
             except (TypeError, ValueError):
@@ -665,6 +702,7 @@ class VectorStore:
                     "last_modified": last_modified,
                     "source_type": source_type,
                     "supersedes": supersedes,
+                    "topic": str(result_topic) if result_topic else None,
                     "word_count": word_count,
                     "query_overlap": lexical_overlap,
                 }
@@ -832,6 +870,7 @@ class VectorStore:
                     "deprecated": bool(metadata.get("deprecated", False)),
                     "supersedes": str(metadata.get("supersedes", "") or ""),
                     "source_type": str(metadata.get("source_type", "") or ""),
+                    "topic": str(metadata.get("topic")) if metadata.get("topic") else None,
                     "word_count": int(metadata.get("word_count", 0) or 0),
                     "confidence": float(metadata.get("confidence", 1.0)),
                 }

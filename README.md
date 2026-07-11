@@ -87,6 +87,7 @@ Recency and lexical overlap are returned as fields for the agent to use, not ble
 - MCP tools: `store`, `search`, `update`, `delete`, `get_chunk`, `get_evolution_chain`, `get_recent`, `self_check`, `get_issues`, backup/restore, and conflict resolution
 - Versioned updates (`strategy="version"`) with supersedes chains
 - `source_type` provenance (`user_statement` vs `ai_inference`) so assistant inferences stay distinguishable from user statements
+- Optional topic/project scoping on writes and exact-match topic filtering on search
 - Soft delete by default (history retained), optional hard delete
 - Heuristic reconciliation and conflict logging
 - Warning-first write responses with structured `warnings[]` and self-heal fields
@@ -119,12 +120,24 @@ tool: store
 input: { "text": "Weekday focus block is 6:30-9:00 AM, current default schedule." }
 ```
 
+To keep project memories distinguishable, writes may include an optional topic ID:
+
+```json
+tool: store
+input: { "text": "Release candidate is due Friday.", "topic": "project-alpha" }
+```
+
 **Retrieve it later:**
 
 ```json
 tool: search
 input: { "query": "current deep work schedule", "top_k": 5 }
 ```
+
+Pass the same `topic` to search only that scope. Topic IDs are case-sensitive,
+1–64 characters, start and end with a letter or digit, and may contain letters,
+digits, `.`, `_`, or `-`. Omitting `topic` keeps the original global behavior:
+search includes both scoped and unscoped chunks. Existing chunks need no migration.
 
 **Bootstrap a new session** by running a few focused retrievals, then synthesizing only active, non-deprecated chunks into a short brief for the new model instance. More flows in [`examples/`](examples).
 

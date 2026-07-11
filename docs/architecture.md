@@ -18,7 +18,7 @@ This document describes the current v1 architecture as implemented today.
 
 ## Chunk Lifecycle
 1. Ingest
-   `store(text)` calls `VectorStore.add_chunk(...)`.
+   `store(text, topic=None)` calls `VectorStore.add_chunk(...)`.
 2. Metadata assignment
    Base metadata is attached at write time (timestamps, confidence, source type, deprecation flags, supersedes pointer, word count).
 3. Reconciliation pass
@@ -44,6 +44,7 @@ Current chunk metadata fields used by retrieval and maintenance:
 - `word_count`: chunk size.
 - `access_count`: retrieval count.
 - `last_accessed`: most recent retrieval timestamp.
+- `topic`: optional validated topic/project identifier for exact-match filtering.
 
 Metadata is intentionally lightweight. Most semantics stay in chunk text so LLMs can reason directly.
 
@@ -68,6 +69,12 @@ assistant; they do not change the ranking. Set `RERANK_ENABLED=false` for plain
 fixed-`top_k` bi-encoder retrieval.
 
 Default behavior excludes deprecated chunks. Set `include_deprecated=True` for history-sensitive tasks.
+
+Topic scoping is opt-in. `store(..., topic="project-alpha")` persists the identifier
+as chunk metadata, and `search(..., topic="project-alpha")` filters to an exact,
+case-sensitive match. Omitting `topic` preserves global retrieval across scoped and
+unscoped chunks. Older chunks have no topic key and require no migration. Versioned
+updates inherit the original chunk's topic.
 
 ## Versioning and Deprecation Model
 - Preferred update mode: `update(..., strategy="version")`.

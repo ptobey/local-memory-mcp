@@ -16,7 +16,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from .health_monitor import HealthMonitor
 from .reconciliation import ReconciliationEngine
-from .vector_store import VectorStore, _load_config
+from .vector_store import VectorStore, _load_config, validate_topic
 
 
 class _StaticTokenVerifier(TokenVerifier):
@@ -193,6 +193,7 @@ def _record_search_receipt(
     query: str,
     results: List[Dict[str, Any]],
     include_deprecated: bool,
+    topic: Optional[str] = None,
 ) -> None:
     """Store a short-lived proof that search() was called (scoped per request/client)."""
     scope_key = _current_receipt_scope_key()
@@ -201,6 +202,7 @@ def _record_search_receipt(
         "recorded_at_epoch": time.time(),
         "query": query,
         "include_deprecated": bool(include_deprecated),
+        "topic": topic,
         "top_results": [
             {
                 "chunk_id": item.get("chunk_id"),
@@ -234,6 +236,7 @@ def _get_recent_search_receipt(max_age_seconds: int = _SEARCH_RECEIPT_TTL_SECOND
         "recorded_at": raw_receipt.get("recorded_at"),
         "query": raw_receipt.get("query"),
         "include_deprecated": bool(raw_receipt.get("include_deprecated", False)),
+        "topic": raw_receipt.get("topic"),
         "scope_key": scope_key,
         "top_chunk_ids": [str(item.get("chunk_id")) for item in top_results if item.get("chunk_id")],
     }
@@ -652,6 +655,7 @@ def _find_update_candidates(
     text: str,
     top_k: int = 5,
     include_deprecated: bool = False,
+    topic: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
     # Duplicate/update detection relies on raw bi-encoder score + rank_score
@@ -661,6 +665,7 @@ def _find_update_candidates(
         top_k=top_k,
         include_deprecated=include_deprecated,
         use_reranker=False,
+        topic=topic,
     )
     for item in similar:
         candidates.append(_candidate_from_search_result(item))
@@ -686,7 +691,15 @@ def _find_stale_parallel_candidates(
     top_k: int = 6,
 ) -> List[Dict[str, Any]]:
     chain_ids = _evolution_chain_ids(store_instance, anchor_chunk_id)
-    candidates = _find_update_candidates(store_instance, text=new_text, top_k=top_k, include_deprecated=False)
+    anchor = store_instance.get_chunk(anchor_chunk_id)
+    topic = (anchor.metadata.get("topic") or None) if anchor else None
+    candidates = _find_update_candidates(
+        store_instance,
+        text=new_text,
+        top_k=top_k,
+        include_deprecated=False,
+        topic=topic,
+    )
     filtered: List[Dict[str, Any]] = []
     for c in candidates:
         cid = str(c.get("chunk_id") or "")
@@ -716,9 +729,16 @@ _WORD_COUNT_FLAG = 500
 
 
 @mcp.tool()
-def store(text: str, source_type: str = "user_statement") -> Dict[str, Any]:
+def store(
+    text: str,
+    source_type: str = "user_statement",
+    topic: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Store net-new information in memory.
+
+    Optionally pass a topic/project identifier to scope this chunk for later
+    filtered retrieval. Omit topic to preserve the unscoped behavior.
 
     RECORD ONLY WHAT THE USER ACTUALLY STATED. Do not import, infer, upgrade, or
     dramatize emotional valence. If the user's reaction is neutral, mixed, or
@@ -767,10 +787,16 @@ def store(text: str, source_type: str = "user_statement") -> Dict[str, Any]:
                 f"Must be one of {sorted(_VALID_SOURCE_TYPES)}."
             ),
         }
+    try:
+        topic = validate_topic(topic)
+    except ValueError as exc:
+        return {"stored": False, "error": str(exc)}
     store_instance, reconciler, _ = _ensure_ready()
     looks_like_update = _looks_like_state_update(text)
     candidate_update_targets: List[Dict[str, Any]] = []
     recent_search_receipt = _get_recent_search_receipt()
+    if topic is not None and (recent_search_receipt or {}).get("topic") != topic:
+        recent_search_receipt = None
     if looks_like_update:
         _log("[STORE] Advisory: input looks like a state update/correction; search/update workflow preferred.")
         try:
@@ -779,6 +805,7 @@ def store(text: str, source_type: str = "user_statement") -> Dict[str, Any]:
                 text=text,
                 top_k=3,
                 include_deprecated=False,
+                topic=topic,
             )
             if candidate_update_targets:
                 _log(
@@ -810,10 +837,17 @@ def store(text: str, source_type: str = "user_statement") -> Dict[str, Any]:
         "update(strategy='version') -> delete stale conflicting chunks -> search verify."
     )
 
-    chunk_id = store_instance.add_chunk(text=text, confidence=1.0, source_type=source_type)
+    chunk_id = store_instance.add_chunk(
+        text=text,
+        confidence=1.0,
+        source_type=source_type,
+        topic=topic,
+    )
     reconciler.queue_for_reconciliation(chunk_id)
     word_count = len(text.split())
     result: Dict[str, Any] = {"chunk_id": chunk_id, "word_count": word_count, "stored": True}
+    if topic is not None:
+        result["topic"] = topic
     if word_count > _WORD_COUNT_FLAG:
         _add_warning(
             result,
@@ -900,9 +934,13 @@ def search(
     top_k: int = 10,
     min_confidence: float = 0.0,
     include_deprecated: bool = False,
+    topic: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Semantic search for existing memory.
+
+    Optionally pass a topic/project identifier for exact-match scoped retrieval.
+    Omit topic to search all chunks exactly as before, including scoped chunks.
 
     Pass a natural-language query and roughly how many results you want (top_k) —
     you don't tune anything else. Treat top_k as a target, not a hard limit: you'll
@@ -936,6 +974,7 @@ def search(
         top_k=top_k,
         min_confidence=min_confidence,
         include_deprecated=include_deprecated,
+        topic=topic,
     )
     normalized_results: List[Dict[str, Any]] = []
     for item in results:
@@ -948,7 +987,12 @@ def search(
             row["chunk_id"] = canonical_id
         normalized_results.append(row)
     results = normalized_results
-    _record_search_receipt(query=query, results=results, include_deprecated=include_deprecated)
+    _record_search_receipt(
+        query=query,
+        results=results,
+        include_deprecated=include_deprecated,
+        topic=topic,
+    )
     _log(f"[SEARCH] query='{query}' results={len(results)}")
     return results
 
