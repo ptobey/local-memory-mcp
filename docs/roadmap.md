@@ -2,6 +2,11 @@
 
 This roadmap is intentionally realistic and focused on reliability.
 
+The proposed V2 direction is defined in the
+[V2 product specification](v2-product-spec.md): scoped retrieval, explicit
+provenance, and a guarded update lifecycle. Its phased roadmap is
+decision-gated and does not describe currently shipped behavior.
+
 ## Shipped in v1.1
 - Two-stage retrieval: bi-encoder recall + cross-encoder reranking, with an adaptive result count and low-confidence bi-encoder fallback (`RERANK_*` config).
 - Literal-only write discipline + `source_type` provenance (`user_statement` vs `ai_inference`).
@@ -22,6 +27,7 @@ This roadmap is intentionally realistic and focused on reliability.
 ## Later
 - Add optional packaging/distribution improvements (container image, pinned runtime profile).
 - Explore pluggable embedding backends while keeping local-first defaults.
+- Evaluate V2 implementation after its P0 contracts, migration plan, and safety criteria are approved.
 
 ## Non-Goals (Current)
 - Multi-tenant SaaS deployment.
