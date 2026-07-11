@@ -357,6 +357,7 @@ class VectorStore:
         embedding_manager: Optional[EmbeddingManager] = None,
         collection_name: str = "master_memory",
         log_collection_name: str = "reconciliation_log",
+        feedback_collection_name: str = "retrieval_feedback",
     ):
         if chromadb is None:
             raise RuntimeError(
@@ -392,6 +393,7 @@ class VectorStore:
             self.rerank_lowconf_floor = 0.4
         self._collection_name = collection_name
         self._log_collection_name = log_collection_name
+        self._feedback_collection_name = feedback_collection_name
         self._open_collections()
         self.embedding_manager = embedding_manager or EmbeddingManager()
 
@@ -411,6 +413,10 @@ class VectorStore:
         self.log_collection = self.client.get_or_create_collection(
             name=self._log_collection_name,
             metadata={"hnsw:space": "cosine"},
+            embedding_function=disabled_embedding,
+        )
+        self.feedback_collection = self.client.get_or_create_collection(
+            name=self._feedback_collection_name,
             embedding_function=disabled_embedding,
         )
 
@@ -499,6 +505,75 @@ class VectorStore:
             metadata=metadata,
             embedding=result["embeddings"][0],
         )
+
+    def record_retrieval_feedback(
+        self,
+        chunk_id: str,
+        feedback: str,
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Persist append-only feedback without changing chunks or retrieval ranking."""
+        if not isinstance(chunk_id, str) or not chunk_id.strip():
+            raise ValueError("chunk_id must be a non-empty string")
+        chunk_id = chunk_id.strip()
+        if self.get_chunk(chunk_id) is None:
+            raise ValueError("chunk_id does not identify an existing memory chunk")
+        if not isinstance(feedback, str) or feedback not in {
+            "relevant",
+            "irrelevant",
+            "superseded",
+        }:
+            raise ValueError("feedback must be one of: relevant, irrelevant, superseded")
+        if reason is not None and not isinstance(reason, str):
+            raise ValueError("reason must be a string or null")
+        normalized_reason = reason.strip() if reason is not None else ""
+        if len(normalized_reason) > 2000:
+            raise ValueError("reason must be 2000 characters or fewer")
+
+        feedback_id = str(uuid4())
+        created_at = _now_iso()
+        record = {
+            "feedback_id": feedback_id,
+            "chunk_id": chunk_id,
+            "feedback": feedback,
+            "reason": normalized_reason or None,
+            "created_at": created_at,
+        }
+        self.feedback_collection.add(
+            ids=[feedback_id],
+            embeddings=[[0.0]],
+            documents=[normalized_reason],
+            metadatas=[
+                _normalize_metadata(
+                    {
+                        "feedback_id": feedback_id,
+                        "chunk_id": chunk_id,
+                        "feedback": feedback,
+                        "reason": normalized_reason,
+                        "created_at": created_at,
+                    }
+                )
+            ],
+        )
+        return record
+
+    def get_retrieval_feedback(self, feedback_id: str) -> Optional[Dict[str, Any]]:
+        """Return one persisted feedback record by its stable ID."""
+        result = self.feedback_collection.get(
+            ids=[feedback_id],
+            include=["metadatas"],
+        )
+        if not result.get("ids"):
+            return None
+        metadata = (result.get("metadatas") or [{}])[0] or {}
+        reason = str(metadata.get("reason") or "")
+        return {
+            "feedback_id": str(metadata.get("feedback_id") or result["ids"][0]),
+            "chunk_id": str(metadata.get("chunk_id") or ""),
+            "feedback": str(metadata.get("feedback") or ""),
+            "reason": reason or None,
+            "created_at": str(metadata.get("created_at") or ""),
+        }
 
     def _update_chunk_metadata(self, chunk_id: str, updates: Dict[str, Any]) -> None:
         existing = self.get_chunk(chunk_id)

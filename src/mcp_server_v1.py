@@ -953,6 +953,41 @@ def search(
     return results
 
 
+@mcp.tool()
+def record_retrieval_feedback(
+    chunk_id: str,
+    feedback: str,
+    reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Record explicit feedback about a search result.
+
+    `feedback` must be exactly `relevant`, `irrelevant`, or `superseded`.
+    `reason` is optional and limited to 2000 characters. Each call appends a
+    durable audit record. This V2-enabling signal does not change ranking,
+    deprecate a chunk, or otherwise mutate memory content.
+    """
+    store_instance, _, _ = _ensure_ready()
+    try:
+        record = store_instance.record_retrieval_feedback(
+            chunk_id=chunk_id,
+            feedback=feedback,
+            reason=reason,
+        )
+    except ValueError as exc:
+        return {
+            "recorded": False,
+            "error": str(exc),
+            "ranking_changed": False,
+            "chunk_updated": False,
+        }
+    return {
+        "recorded": True,
+        **record,
+        "ranking_changed": False,
+        "chunk_updated": False,
+    }
+
+
 def update_chunk(
     chunk_id: str,
     new_text: str,

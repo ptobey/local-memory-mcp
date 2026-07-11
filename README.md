@@ -84,7 +84,7 @@ Recency and lexical overlap are returned as fields for the agent to use, not ble
 ## Features
 
 - Two-stage retrieval: bi-encoder recall → cross-encoder reranking, with an adaptive result count and graceful bi-encoder fallback
-- MCP tools: `store`, `search`, `update`, `delete`, `get_chunk`, `get_evolution_chain`, `get_recent`, `self_check`, `get_issues`, backup/restore, and conflict resolution
+- MCP tools: `store`, `search`, `record_retrieval_feedback`, `update`, `delete`, `get_chunk`, `get_evolution_chain`, `get_recent`, `self_check`, `get_issues`, backup/restore, and conflict resolution
 - Versioned updates (`strategy="version"`) with supersedes chains
 - `source_type` provenance (`user_statement` vs `ai_inference`) so assistant inferences stay distinguishable from user statements
 - Soft delete by default (history retained), optional hard delete

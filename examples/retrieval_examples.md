@@ -52,4 +52,19 @@ search("current schedule constraints")
 search("recent corrections or superseded assumptions")
 ```
 
+## Capture retrieval feedback
+
+After inspecting a search result, clients can persist an explicit signal:
+
+```text
+record_retrieval_feedback(
+  chunk_id="<id returned by search>",
+  feedback="relevant",  # relevant | irrelevant | superseded
+  reason="This directly answered the current-schedule question."
+)
+```
+
+The call appends an audit record. Feedback does not yet affect ranking, deprecate
+the chunk, or edit its content; use `update`/`delete` for memory changes.
+
 Then build a session brief using active non-deprecated chunks first, and include older chunks only as historical context.
